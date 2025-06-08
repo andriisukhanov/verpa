@@ -1,0 +1,553 @@
+{
+  "info": {
+    "name": "Verpa API Collection",
+    "description": "Complete API collection for Verpa aquarium management system",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{authToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000/api/v1",
+      "type": "string"
+    },
+    {
+      "key": "authToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "refreshToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "userId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "aquariumId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Register",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 201\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has user data\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('user');",
+                  "    pm.expect(jsonData.user).to.have.property('id');",
+                  "    pm.expect(jsonData.user).to.have.property('email');",
+                  "    ",
+                  "    pm.collectionVariables.set(\"userId\", jsonData.user.id);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"email\": \"test{{$timestamp}}@example.com\",\n    \"password\": \"TestPassword123!\",\n    \"name\": \"Test User\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "register"]
+            }
+          }
+        },
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has tokens\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('tokens');",
+                  "    pm.expect(jsonData.tokens).to.have.property('accessToken');",
+                  "    pm.expect(jsonData.tokens).to.have.property('refreshToken');",
+                  "    ",
+                  "    pm.collectionVariables.set(\"authToken\", jsonData.tokens.accessToken);",
+                  "    pm.collectionVariables.set(\"refreshToken\", jsonData.tokens.refreshToken);",
+                  "    pm.collectionVariables.set(\"userId\", jsonData.user.id);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"email\": \"test@example.com\",\n    \"password\": \"TestPassword123!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            }
+          }
+        },
+        {
+          "name": "Get Profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "me"]
+            }
+          }
+        },
+        {
+          "name": "Refresh Token",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"refreshToken\": \"{{refreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/refresh",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "refresh"]
+            }
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"refreshToken\": \"{{refreshToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/logout",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "logout"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Aquariums",
+      "item": [
+        {
+          "name": "Create Aquarium",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 201\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "pm.test(\"Aquarium created successfully\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('id');",
+                  "    pm.collectionVariables.set(\"aquariumId\", jsonData.id);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"My Test Aquarium\",\n    \"type\": \"freshwater\",\n    \"volume\": 200,\n    \"volumeUnit\": \"liters\",\n    \"dimensions\": {\n        \"length\": 100,\n        \"width\": 40,\n        \"height\": 50\n    },\n    \"description\": \"A beautiful freshwater community tank\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/aquariums",
+              "host": ["{{baseUrl}}"],
+              "path": ["aquariums"]
+            }
+          }
+        },
+        {
+          "name": "Get All Aquariums",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/aquariums",
+              "host": ["{{baseUrl}}"],
+              "path": ["aquariums"]
+            }
+          }
+        },
+        {
+          "name": "Get Aquarium Details",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/aquariums/{{aquariumId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["aquariums", "{{aquariumId}}"]
+            }
+          }
+        },
+        {
+          "name": "Update Aquarium",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"Updated Aquarium Name\",\n    \"description\": \"Updated description\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/aquariums/{{aquariumId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["aquariums", "{{aquariumId}}"]
+            }
+          }
+        },
+        {
+          "name": "Delete Aquarium",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/aquariums/{{aquariumId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["aquariums", "{{aquariumId}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Water Parameters",
+      "item": [
+        {
+          "name": "Record Parameters",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"temperature\": 25.5,\n    \"ph\": 7.2,\n    \"ammonia\": 0.0,\n    \"nitrite\": 0.0,\n    \"nitrate\": 10.0,\n    \"phosphate\": 0.5,\n    \"gh\": 8,\n    \"kh\": 6\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/aquariums/{{aquariumId}}/parameters",
+              "host": ["{{baseUrl}}"],
+              "path": ["aquariums", "{{aquariumId}}", "parameters"]
+            }
+          }
+        },
+        {
+          "name": "Get Parameter History",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/aquariums/{{aquariumId}}/parameters/history?days=30",
+              "host": ["{{baseUrl}}"],
+              "path": ["aquariums", "{{aquariumId}}", "parameters", "history"],
+              "query": [
+                {
+                  "key": "days",
+                  "value": "30"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Inhabitants",
+      "item": [
+        {
+          "name": "Add Inhabitant",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"species\": \"Neon Tetra\",\n    \"quantity\": 10,\n    \"type\": \"fish\",\n    \"scientificName\": \"Paracheirodon innesi\",\n    \"notes\": \"Schooling fish, peaceful\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/aquariums/{{aquariumId}}/inhabitants",
+              "host": ["{{baseUrl}}"],
+              "path": ["aquariums", "{{aquariumId}}", "inhabitants"]
+            }
+          }
+        },
+        {
+          "name": "Update Inhabitant",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"quantity\": 12,\n    \"health\": \"excellent\",\n    \"notes\": \"Added 2 more to the school\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/aquariums/{{aquariumId}}/inhabitants/:inhabitantId",
+              "host": ["{{baseUrl}}"],
+              "path": ["aquariums", "{{aquariumId}}", "inhabitants", ":inhabitantId"]
+            }
+          }
+        },
+        {
+          "name": "Remove Inhabitant",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/aquariums/{{aquariumId}}/inhabitants/:inhabitantId",
+              "host": ["{{baseUrl}}"],
+              "path": ["aquariums", "{{aquariumId}}", "inhabitants", ":inhabitantId"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Equipment",
+      "item": [
+        {
+          "name": "Add Equipment",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"Fluval FX6 Filter\",\n    \"type\": \"filter\",\n    \"brand\": \"Fluval\",\n    \"model\": \"FX6\",\n    \"purchaseDate\": \"2024-01-15\",\n    \"warrantyExpiry\": \"2026-01-15\",\n    \"notes\": \"Canister filter for large aquariums\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/aquariums/{{aquariumId}}/equipment",
+              "host": ["{{baseUrl}}"],
+              "path": ["aquariums", "{{aquariumId}}", "equipment"]
+            }
+          }
+        },
+        {
+          "name": "Update Equipment",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"status\": \"maintenance_required\",\n    \"lastMaintenance\": \"2024-06-01\",\n    \"notes\": \"Need to clean impeller\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/aquariums/{{aquariumId}}/equipment/:equipmentId",
+              "host": ["{{baseUrl}}"],
+              "path": ["aquariums", "{{aquariumId}}", "equipment", ":equipmentId"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Events",
+      "item": [
+        {
+          "name": "Create Event",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"type\": \"water_change\",\n    \"title\": \"Weekly Water Change\",\n    \"scheduledDate\": \"2024-06-15T10:00:00Z\",\n    \"recurrence\": \"weekly\",\n    \"reminder\": {\n        \"enabled\": true,\n        \"minutesBefore\": 60\n    },\n    \"notes\": \"25% water change every week\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/events",
+              "host": ["{{baseUrl}}"],
+              "path": ["events"]
+            }
+          }
+        },
+        {
+          "name": "Get Events",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/events?aquariumId={{aquariumId}}&startDate=2024-06-01&endDate=2024-06-30",
+              "host": ["{{baseUrl}}"],
+              "path": ["events"],
+              "query": [
+                {
+                  "key": "aquariumId",
+                  "value": "{{aquariumId}}"
+                },
+                {
+                  "key": "startDate",
+                  "value": "2024-06-01"
+                },
+                {
+                  "key": "endDate",
+                  "value": "2024-06-30"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Mark Event Complete",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"completedAt\": \"2024-06-08T10:30:00Z\",\n    \"notes\": \"Changed 50L of water, added dechlorinator\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/events/:eventId/complete",
+              "host": ["{{baseUrl}}"],
+              "path": ["events", ":eventId", "complete"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Health Checks",
+      "item": [
+        {
+          "name": "API Gateway Health",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["health"]
+            }
+          }
+        },
+        {
+          "name": "All Services Health",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health/all",
+              "host": ["{{baseUrl}}"],
+              "path": ["health", "all"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -52,6 +52,9 @@ mobile/ios/Flutter/Flutter.podspec
 mobile/ios/Pods/
 mobile/android/.gradle/
 mobile/android/local.properties
+mobile/flutter.tar.xz
+*.tar.xz
+*.tar.gz
 
 # Admin specific
 admin/.next/

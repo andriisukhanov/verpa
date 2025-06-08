@@ -1,0 +1,6 @@
+export enum AquariumStatus {
+  ACTIVE = 'ACTIVE',
+  MAINTENANCE = 'MAINTENANCE',
+  INACTIVE = 'INACTIVE',
+  DELETED = 'DELETED',
+}

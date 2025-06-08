@@ -1,0 +1,16 @@
+node_modules
+dist
+coverage
+.env
+.env.local
+.env.*.local
+*.log
+.DS_Store
+.vscode
+.idea
+test
+*.spec.ts
+*.test.ts
+jest.config.js
+.eslintrc.js
+.prettierrc

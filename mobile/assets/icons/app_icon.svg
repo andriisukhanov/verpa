@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background Circle -->
+  <circle cx="256" cy="256" r="240" fill="#1E88E5"/>
+  
+  <!-- Water Wave Pattern -->
+  <path d="M80 320 Q128 280 176 320 T272 320 T368 320 T432 320" 
+        stroke="white" stroke-width="16" fill="none" opacity="0.3"/>
+  <path d="M80 360 Q128 320 176 360 T272 360 T368 360 T432 360" 
+        stroke="white" stroke-width="16" fill="none" opacity="0.5"/>
+  <path d="M80 400 Q128 360 176 400 T272 400 T368 400 T432 400" 
+        stroke="white" stroke-width="16" fill="none" opacity="0.7"/>
+  
+  <!-- Fish Silhouette -->
+  <g transform="translate(256, 200)">
+    <!-- Fish Body -->
+    <ellipse cx="0" cy="0" rx="80" ry="50" fill="white"/>
+    <!-- Fish Tail -->
+    <path d="M60 0 L100 -30 L100 30 Z" fill="white"/>
+    <!-- Fish Eye -->
+    <circle cx="-40" cy="-10" r="8" fill="#1E88E5"/>
+    <!-- Fish Details -->
+    <path d="M-20 0 Q0 -20 20 0" stroke="#1E88E5" stroke-width="3" fill="none"/>
+    <path d="M-20 10 Q0 -10 20 10" stroke="#1E88E5" stroke-width="3" fill="none"/>
+  </g>
+  
+  <!-- Bubbles -->
+  <circle cx="180" cy="150" r="12" fill="white" opacity="0.6"/>
+  <circle cx="320" cy="130" r="8" fill="white" opacity="0.5"/>
+  <circle cx="350" cy="170" r="10" fill="white" opacity="0.7"/>
+  <circle cx="150" cy="110" r="6" fill="white" opacity="0.4"/>
+</svg>

@@ -1,0 +1,645 @@
+version: '3.8'
+
+services:
+  # MongoDB - Primary database
+  mongodb:
+    image: mongo:7.0
+    container_name: verpa-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: verpa_admin
+      MONGO_INITDB_ROOT_PASSWORD: verpa_secure_password_2024
+      MONGO_INITDB_DATABASE: verpa
+    volumes:
+      - mongodb_data:/data/db
+      - ./backend/docker/mongodb/init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
+    networks:
+      - verpa-network
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # Redis - Caching and session storage
+  redis:
+    image: redis:7.2-alpine
+    container_name: verpa-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --requirepass verpa_redis_password_2024 --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    networks:
+      - verpa-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Kafka - Message broker
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: verpa-zookeeper
+    restart: unless-stopped
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_LOG4J_ROOT_LOGLEVEL: ERROR
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_logs:/var/lib/zookeeper/log
+    networks:
+      - verpa-network
+    healthcheck:
+      test: ["CMD", "zkServer.sh", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: verpa-kafka
+    restart: unless-stopped
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      - "9092:9092"
+      - "9094:9094"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,OUTSIDE:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9094,OUTSIDE://localhost:9092
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9094,OUTSIDE://0.0.0.0:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_LOG4J_ROOT_LOGLEVEL: ERROR
+      KAFKA_LOG4J_LOGGERS: "kafka.controller=INFO,kafka.producer.async.DefaultEventHandler=INFO,state.change.logger=INFO"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    networks:
+      - verpa-network
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Kafka UI for development
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: verpa-kafka-ui
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: verpa-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9094
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+      DYNAMIC_CONFIG_ENABLED: 'true'
+    networks:
+      - verpa-network
+
+  # MongoDB Express - Database UI for development
+  mongo-express:
+    image: mongo-express:latest
+    container_name: verpa-mongo-express
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: verpa_admin
+      ME_CONFIG_MONGODB_ADMINPASSWORD: verpa_secure_password_2024
+      ME_CONFIG_MONGODB_URL: mongodb://verpa_admin:verpa_secure_password_2024@mongodb:27017/
+      ME_CONFIG_BASICAUTH_USERNAME: admin
+      ME_CONFIG_BASICAUTH_PASSWORD: verpa_admin_2024
+    networks:
+      - verpa-network
+
+  # Redis Commander - Redis UI for development
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: verpa-redis-commander
+    restart: unless-stopped
+    depends_on:
+      - redis
+    ports:
+      - "8082:8081"
+    environment:
+      REDIS_HOSTS: local:redis:6379:0:verpa_redis_password_2024
+      HTTP_USER: admin
+      HTTP_PASSWORD: verpa_admin_2024
+    networks:
+      - verpa-network
+
+  # MinIO - S3-compatible object storage for file uploads
+  minio:
+    image: minio/minio:latest
+    container_name: verpa-minio
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: verpa_minio_admin
+      MINIO_ROOT_PASSWORD: verpa_minio_password_2024
+      MINIO_DEFAULT_BUCKETS: verpa-uploads:public,verpa-backups:private
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - verpa-network
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # PostgreSQL - For future analytics or reporting needs
+  postgres:
+    image: postgres:16-alpine
+    container_name: verpa-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: verpa_pg_user
+      POSTGRES_PASSWORD: verpa_pg_password_2024
+      POSTGRES_DB: verpa_analytics
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - verpa-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U verpa_pg_user -d verpa_analytics"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Notification Service
+  notification-service:
+    build:
+      context: ./backend/services/notification-service
+      dockerfile: Dockerfile
+    container_name: verpa-notification-service
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: 3004
+      SERVICE_NAME: notification-service
+      # Kafka
+      KAFKA_BROKERS: kafka:9094
+      KAFKA_CLIENT_ID: notification-service
+      KAFKA_GROUP_ID: notification-service-group
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: verpa_redis_password_2024
+      # Email settings (using SMTP for dev)
+      EMAIL_PROVIDER: smtp
+      EMAIL_FROM_NAME: Verpa
+      EMAIL_FROM_ADDRESS: noreply@verpa.local
+      SMTP_HOST: mailhog
+      SMTP_PORT: 1025
+      SMTP_SECURE: false
+      # Frontend URL for links
+      FRONTEND_URL: http://localhost:3000
+    ports:
+      - "3004:3004"
+    networks:
+      - verpa-network
+    volumes:
+      - ./backend/services/notification-service:/app
+      - /app/node_modules
+
+  # Mailhog - Email testing for development
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: verpa-mailhog
+    restart: unless-stopped
+    ports:
+      - "1025:1025"  # SMTP server
+      - "8025:8025"  # Web UI
+    networks:
+      - verpa-network
+
+  # Media Service
+  media-service:
+    build:
+      context: ./backend/services/media-service
+      dockerfile: Dockerfile
+    container_name: verpa-media-service
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: 3005
+      SERVICE_NAME: media-service
+      # Storage
+      STORAGE_PROVIDER: minio
+      STORAGE_ENDPOINT: http://minio:9000
+      STORAGE_ACCESS_KEY: verpa_minio_admin
+      STORAGE_SECRET_KEY: verpa_minio_password_2024
+      STORAGE_BUCKET: verpa-uploads
+      STORAGE_PUBLIC_BUCKET: verpa-public
+      STORAGE_USE_SSL: false
+      # Kafka
+      KAFKA_BROKERS: kafka:9094
+      KAFKA_CLIENT_ID: media-service
+      KAFKA_GROUP_ID: media-service-group
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: verpa_redis_password_2024
+      # Upload limits
+      MAX_FILE_SIZE: 10485760
+      MAX_FILES: 10
+      # Image processing
+      IMAGE_QUALITY: 85
+      IMAGE_FORMAT: webp
+      # Security
+      SIGNED_URL_EXPIRY: 3600
+      ALLOWED_ORIGINS: http://localhost:3000
+    ports:
+      - "3005:3005"
+    networks:
+      - verpa-network
+    volumes:
+      - ./backend/services/media-service:/app
+      - /app/node_modules
+
+  # API Gateway
+  api-gateway:
+    build:
+      context: ./backend/services/api-gateway
+      dockerfile: Dockerfile
+    container_name: verpa-api-gateway
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      SERVICE_NAME: api-gateway
+      # Service URLs
+      USER_SERVICE_URL: http://user-service:3001
+      AQUARIUM_SERVICE_URL: http://aquarium-service:3002
+      EVENT_SERVICE_URL: http://event-service:3003
+      NOTIFICATION_SERVICE_URL: http://notification-service:3004
+      MEDIA_SERVICE_URL: http://media-service:3005
+      ANALYTICS_SERVICE_URL: http://analytics-service:3006
+      SUBSCRIPTION_SERVICE_URL: http://subscription-service:3007
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: verpa_redis_password_2024
+      # Security
+      JWT_SECRET: jwt-secret-key-dev
+      API_KEY: verpa_api_key_dev
+      # Rate limiting
+      RATE_LIMIT_WINDOW_MS: 60000
+      RATE_LIMIT_MAX: 1000
+      # CORS
+      CORS_ENABLED: true
+      CORS_ORIGIN: http://localhost:3000
+    ports:
+      - "3000:3000"
+    networks:
+      - verpa-network
+    volumes:
+      - ./backend/services/api-gateway:/app
+      - /app/node_modules
+
+  # User Service
+  user-service:
+    build:
+      context: ./backend/services/user-service
+      dockerfile: Dockerfile
+    container_name: verpa-user-service
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: 3001
+      SERVICE_NAME: user-service
+      # MongoDB
+      MONGODB_URI: mongodb://verpa_admin:verpa_secure_password_2024@mongodb:27017/verpa_users?authSource=admin
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: verpa_redis_password_2024
+      # Kafka
+      KAFKA_BROKERS: kafka:9094
+      KAFKA_CLIENT_ID: user-service
+      KAFKA_GROUP_ID: user-service-group
+      # JWT
+      JWT_SECRET: jwt-secret-key-dev
+      JWT_EXPIRES_IN: 7d
+      # OAuth
+      GOOGLE_CLIENT_ID: your-google-client-id
+      GOOGLE_CLIENT_SECRET: your-google-client-secret
+      APPLE_CLIENT_ID: your-apple-client-id
+      APPLE_TEAM_ID: your-apple-team-id
+      APPLE_KEY_ID: your-apple-key-id
+      # Security
+      INTERNAL_API_KEY: verpa_internal_api_key_dev
+    ports:
+      - "3001:3001"
+    networks:
+      - verpa-network
+    volumes:
+      - ./backend/services/user-service:/app
+      - /app/node_modules
+
+  # Aquarium Service
+  aquarium-service:
+    build:
+      context: ./backend/services/aquarium-service
+      dockerfile: Dockerfile
+    container_name: verpa-aquarium-service
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: 3002
+      SERVICE_NAME: aquarium-service
+      # MongoDB
+      MONGODB_URI: mongodb://verpa_admin:verpa_secure_password_2024@mongodb:27017/verpa_aquariums?authSource=admin
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: verpa_redis_password_2024
+      # Kafka
+      KAFKA_BROKERS: kafka:9094
+      KAFKA_CLIENT_ID: aquarium-service
+      KAFKA_GROUP_ID: aquarium-service-group
+      # Media service
+      MEDIA_SERVICE_URL: http://media-service:3005
+      # Security
+      JWT_SECRET: jwt-secret-key-dev
+      INTERNAL_API_KEY: verpa_internal_api_key_dev
+    ports:
+      - "3002:3002"
+    networks:
+      - verpa-network
+    volumes:
+      - ./backend/services/aquarium-service:/app
+      - /app/node_modules
+
+  # Event Service
+  event-service:
+    build:
+      context: ./backend/services/event-service
+      dockerfile: Dockerfile
+    container_name: verpa-event-service
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: 3003
+      SERVICE_NAME: event-service
+      # MongoDB
+      MONGODB_URI: mongodb://verpa_admin:verpa_secure_password_2024@mongodb:27017/verpa_events?authSource=admin
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: verpa_redis_password_2024
+      # Kafka
+      KAFKA_BROKERS: kafka:9094
+      KAFKA_CLIENT_ID: event-service
+      KAFKA_GROUP_ID: event-service-group
+      # Security
+      JWT_SECRET: jwt-secret-key-dev
+      INTERNAL_API_KEY: verpa_internal_api_key_dev
+    ports:
+      - "3003:3003"
+    networks:
+      - verpa-network
+    volumes:
+      - ./backend/services/event-service:/app
+      - /app/node_modules
+
+  # Mobile BFF Service
+  mobile-bff:
+    build:
+      context: ./backend/services/mobile-bff
+      dockerfile: Dockerfile
+    container_name: verpa-mobile-bff
+    restart: unless-stopped
+    depends_on:
+      - api-gateway
+      - redis
+    environment:
+      NODE_ENV: development
+      PORT: 3100
+      SERVICE_NAME: mobile-bff
+      # Backend services
+      API_GATEWAY_URL: http://api-gateway:3000
+      USER_SERVICE_URL: http://user-service:3001
+      AQUARIUM_SERVICE_URL: http://aquarium-service:3002
+      EVENT_SERVICE_URL: http://event-service:3003
+      NOTIFICATION_SERVICE_URL: http://notification-service:3004
+      MEDIA_SERVICE_URL: http://media-service:3005
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: verpa_redis_password_2024
+      REDIS_TTL: 300
+      CACHE_TTL: 60
+      # Rate limiting
+      RATE_LIMIT_WINDOW_MS: 60000
+      RATE_LIMIT_MAX: 100
+      # CORS
+      CORS_ENABLED: true
+      CORS_ORIGIN: http://localhost:3000
+      # Security
+      INTERNAL_API_KEY: verpa_internal_api_key_dev
+      # Mobile specific
+      MAX_PAGE_SIZE: 50
+      DEFAULT_PAGE_SIZE: 20
+    ports:
+      - "3100:3100"
+    networks:
+      - verpa-network
+    volumes:
+      - ./backend/services/mobile-bff:/app
+      - /app/node_modules
+
+  # Analytics Service
+  analytics-service:
+    build:
+      context: ./backend/services/analytics-service
+      dockerfile: Dockerfile
+    container_name: verpa-analytics-service
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: 3006
+      SERVICE_NAME: analytics-service
+      # MongoDB
+      MONGODB_URI: mongodb://verpa_admin:verpa_secure_password_2024@mongodb:27017/verpa_analytics?authSource=admin
+      # PostgreSQL
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: verpa_pg_user
+      POSTGRES_PASSWORD: verpa_pg_password_2024
+      POSTGRES_DB: verpa_analytics
+      # Kafka
+      KAFKA_BROKERS: kafka:9094
+      KAFKA_CLIENT_ID: analytics-service
+      KAFKA_GROUP_ID: analytics-service-group
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: verpa_redis_password_2024
+      # Analytics settings
+      RAW_EVENTS_RETENTION_DAYS: 30
+      AGGREGATED_DATA_RETENTION_DAYS: 365
+      USER_SESSIONS_RETENTION_DAYS: 90
+      BATCH_SIZE: 1000
+      BATCH_FLUSH_INTERVAL_MS: 5000
+      # Security
+      INTERNAL_API_KEY: verpa_internal_api_key_dev
+    ports:
+      - "3006:3006"
+    networks:
+      - verpa-network
+    volumes:
+      - ./backend/services/analytics-service:/app
+      - /app/node_modules
+
+  # Subscription Service
+  subscription-service:
+    build:
+      context: ./backend/services/subscription-service
+      dockerfile: Dockerfile
+    container_name: verpa-subscription-service
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: 3007
+      SERVICE_NAME: subscription-service
+      # MongoDB
+      MONGODB_URI: mongodb://verpa_admin:verpa_secure_password_2024@mongodb:27017/verpa_subscriptions?authSource=admin
+      # Kafka
+      KAFKA_BROKERS: kafka:9094
+      KAFKA_CLIENT_ID: subscription-service
+      KAFKA_GROUP_ID: subscription-service-group
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: verpa_redis_password_2024
+      # Stripe (use test keys)
+      STRIPE_SECRET_KEY: sk_test_51234567890abcdefghijklmnopqrstuvwxyz
+      STRIPE_WEBHOOK_SECRET: whsec_test1234567890abcdefghijklmnop
+      STRIPE_PUBLISHABLE_KEY: pk_test_51234567890abcdefghijklmnopqrstuvwxyz
+      # Stripe Price IDs (test)
+      STRIPE_HOBBY_PRICE_ID: price_test_hobby
+      STRIPE_PRO_PRICE_ID: price_test_pro
+      STRIPE_BUSINESS_PRICE_ID: price_test_business
+      # Subscription settings
+      TRIAL_DURATION_DAYS: 14
+      GRACE_PERIOD_DAYS: 7
+      # Payment settings
+      PAYMENT_CURRENCY: usd
+      TAX_RATE: 0
+      # Security
+      JWT_SECRET: jwt-secret-key-dev
+      INTERNAL_API_KEY: verpa_internal_api_key_dev
+    ports:
+      - "3007:3007"
+    networks:
+      - verpa-network
+    volumes:
+      - ./backend/services/subscription-service:/app
+      - /app/node_modules
+
+networks:
+  verpa-network:
+    driver: bridge
+    name: verpa-network
+
+volumes:
+  mongodb_data:
+    driver: local
+  redis_data:
+    driver: local
+  zookeeper_data:
+    driver: local
+  zookeeper_logs:
+    driver: local
+  kafka_data:
+    driver: local
+  minio_data:
+    driver: local
+  postgres_data:
+    driver: local

@@ -1,0 +1,9 @@
+# Ignore all key files
+*.p8
+*.pem
+*.key
+*.crt
+*.cer
+
+# Keep this file
+!.gitignore

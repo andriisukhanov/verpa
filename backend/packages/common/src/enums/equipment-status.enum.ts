@@ -1,0 +1,7 @@
+export enum EquipmentStatus {
+  ACTIVE = 'ACTIVE',
+  INACTIVE = 'INACTIVE',
+  MAINTENANCE_REQUIRED = 'MAINTENANCE_REQUIRED',
+  BROKEN = 'BROKEN',
+  FAULTY = 'FAULTY',
+}

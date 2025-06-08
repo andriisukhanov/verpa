@@ -1,0 +1,31 @@
+{
+  "name": "verpa",
+  "version": "1.0.0",
+  "description": "Verpa - Aquarium Monitoring System",
+  "private": true,
+  "workspaces": [
+    "backend/packages/*",
+    "backend/services/*",
+    "mobile",
+    "admin"
+  ],
+  "scripts": {
+    "prepare": "husky install",
+    "test": "npm run test --workspaces",
+    "test:cov": "npm run test:cov --workspaces",
+    "lint": "npm run lint --workspaces",
+    "format": "prettier --write \"**/*.{js,ts,tsx,json,md}\"",
+    "format:check": "prettier --check \"**/*.{js,ts,tsx,json,md}\""
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^18.4.3",
+    "@commitlint/config-conventional": "^18.4.3",
+    "husky": "^8.0.3",
+    "prettier": "^3.1.1"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "yarn": ">=1.22.0"
+  },
+  "packageManager": "yarn@1.22.21"
+}

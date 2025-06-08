@@ -1,443 +1,517 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
-import { ConfigModule } from '@nestjs/config';
-import { JwtModule } from '@nestjs/jwt';
-import { EventEmitterModule } from '@nestjs/event-emitter';
-import * as request from 'supertest';
 import { MongoMemoryServer } from 'mongodb-memory-server';
-import { Connection } from 'mongoose';
-import { getConnectionToken } from '@nestjs/mongoose';
-import { UserModule } from '../../src/user.module';
-import { configuration } from '../../src/config/configuration';
+import * as bcrypt from 'bcrypt';
+import { AppModule } from '../../src/app.module';
+import { UserService } from '../../src/domain/services/user.service';
+import { UserRepository } from '../../src/infrastructure/repositories/user.repository';
+import { AuthService } from '../../src/application/services/auth.service';
 import { UserRole, SubscriptionType } from '@verpa/common';
 
-describe('User Integration Tests', () => {
+describe('User Service Integration Tests', () => {
   let app: INestApplication;
-  let mongod: MongoMemoryServer;
-  let mongoConnection: Connection;
-  let authToken: string;
-  let adminToken: string;
-  let createdUserId: string;
+  let mongoServer: MongoMemoryServer;
+  let userService: UserService;
+  let authService: AuthService;
+  let userRepository: UserRepository;
+
+  const testUser = {
+    email: 'test@example.com',
+    username: 'testuser',
+    password: 'Password123!',
+    firstName: 'Test',
+    lastName: 'User',
+    phone: '+1234567890',
+  };
 
   beforeAll(async () => {
-    // Start in-memory MongoDB
-    mongod = await MongoMemoryServer.create();
-    const uri = mongod.getUri();
+    // Start in-memory MongoDB instance
+    mongoServer = await MongoMemoryServer.create();
+    const mongoUri = mongoServer.getUri();
 
-    const module: TestingModule = await Test.createTestingModule({
+    const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [
-        ConfigModule.forRoot({
-          isGlobal: true,
-          load: [configuration],
-        }),
-        MongooseModule.forRoot(uri),
-        EventEmitterModule.forRoot(),
-        UserModule,
+        MongooseModule.forRoot(mongoUri),
+        AppModule,
       ],
     }).compile();
 
-    app = module.createNestApplication();
-    app.useGlobalPipes(
-      new ValidationPipe({
-        whitelist: true,
-        transform: true,
-        forbidNonWhitelisted: true,
-      }),
-    );
-
+    app = moduleFixture.createNestApplication();
+    app.useGlobalPipes(new ValidationPipe());
+    
     await app.init();
-    mongoConnection = module.get<Connection>(getConnectionToken());
+
+    userService = moduleFixture.get<UserService>(UserService);
+    authService = moduleFixture.get<AuthService>(AuthService);
+    userRepository = moduleFixture.get<UserRepository>(UserRepository);
   });
 
   afterAll(async () => {
-    await mongoConnection.close();
-    await mongod.stop();
     await app.close();
+    await mongoServer.stop();
   });
 
-  describe('Auth Endpoints', () => {
-    describe('POST /auth/register', () => {
-      it('should register a new user', async () => {
-        const registerDto = {
-          email: 'test@example.com',
-          username: 'testuser',
-          password: 'SecureP@ssw0rd!',
-          firstName: 'Test',
-          lastName: 'User',
-        };
+  afterEach(async () => {
+    // Clean up database between tests
+    const collections = await mongoServer.db.collections();
+    for (const collection of collections) {
+      await collection.deleteMany({});
+    }
+  });
 
-        const response = await request(app.getHttpServer())
-          .post('/auth/register')
-          .send(registerDto)
-          .expect(201);
+  describe('User Registration Flow', () => {
+    it('should register a new user successfully', async () => {
+      const result = await authService.register(testUser);
 
-        expect(response.body).toMatchObject({
-          user: {
-            email: 'test@example.com',
-            username: 'testuser',
-            firstName: 'Test',
-            lastName: 'User',
-            role: UserRole.USER,
-            subscriptionType: SubscriptionType.FREE,
-          },
-          accessToken: expect.any(String),
-          refreshToken: expect.any(String),
-          expiresIn: expect.any(Number),
-        });
-
-        authToken = response.body.accessToken;
-        createdUserId = response.body.user._id;
-      });
-
-      it('should fail with invalid email', async () => {
-        const registerDto = {
-          email: 'invalid-email',
-          username: 'testuser2',
-          password: 'SecureP@ssw0rd!',
-          firstName: 'Test',
-          lastName: 'User',
-        };
-
-        const response = await request(app.getHttpServer())
-          .post('/auth/register')
-          .send(registerDto)
-          .expect(400);
-
-        expect(response.body.message).toContain('email must be an email');
-      });
-
-      it('should fail with weak password', async () => {
-        const registerDto = {
-          email: 'test2@example.com',
-          username: 'testuser2',
-          password: 'weak',
-          firstName: 'Test',
-          lastName: 'User',
-        };
-
-        const response = await request(app.getHttpServer())
-          .post('/auth/register')
-          .send(registerDto)
-          .expect(400);
-
-        expect(response.body.message).toContain('password is not strong enough');
-      });
-
-      it('should fail with duplicate email', async () => {
-        const registerDto = {
-          email: 'test@example.com',
-          username: 'testuser3',
-          password: 'SecureP@ssw0rd!',
-          firstName: 'Test',
-          lastName: 'User',
-        };
-
-        await request(app.getHttpServer())
-          .post('/auth/register')
-          .send(registerDto)
-          .expect(409);
-      });
+      expect(result).toHaveProperty('user');
+      expect(result).toHaveProperty('tokens');
+      expect(result.user.email).toBe(testUser.email);
+      expect(result.user.username).toBe(testUser.username);
+      expect(result.user.emailVerified).toBe(false);
+      expect(result.tokens).toHaveProperty('accessToken');
+      expect(result.tokens).toHaveProperty('refreshToken');
     });
 
-    describe('POST /auth/login', () => {
-      beforeAll(async () => {
-        // Create admin user for tests
-        const adminDto = {
-          email: 'admin@example.com',
-          username: 'admin',
-          password: 'AdminP@ssw0rd!',
-          firstName: 'Admin',
-          lastName: 'User',
-        };
+    it('should hash password during registration', async () => {
+      const result = await authService.register(testUser);
+      const user = await userRepository.findById(result.user.id);
 
-        const response = await request(app.getHttpServer())
-          .post('/auth/register')
-          .send(adminDto)
-          .expect(201);
-
-        // Update user role to admin (would normally be done through admin endpoint)
-        await mongoConnection.collection('users').updateOne(
-          { _id: response.body.user._id },
-          { $set: { role: UserRole.ADMIN } },
-        );
-
-        // Login as admin
-        const loginResponse = await request(app.getHttpServer())
-          .post('/auth/login')
-          .send({
-            emailOrUsername: 'admin@example.com',
-            password: 'AdminP@ssw0rd!',
-          })
-          .expect(200);
-
-        adminToken = loginResponse.body.accessToken;
-      });
-
-      it('should login with email', async () => {
-        const response = await request(app.getHttpServer())
-          .post('/auth/login')
-          .send({
-            emailOrUsername: 'test@example.com',
-            password: 'SecureP@ssw0rd!',
-          })
-          .expect(200);
-
-        expect(response.body).toMatchObject({
-          user: {
-            email: 'test@example.com',
-          },
-          accessToken: expect.any(String),
-          refreshToken: expect.any(String),
-        });
-      });
-
-      it('should login with username', async () => {
-        const response = await request(app.getHttpServer())
-          .post('/auth/login')
-          .send({
-            emailOrUsername: 'testuser',
-            password: 'SecureP@ssw0rd!',
-          })
-          .expect(200);
-
-        expect(response.body.user.username).toBe('testuser');
-      });
-
-      it('should fail with invalid credentials', async () => {
-        await request(app.getHttpServer())
-          .post('/auth/login')
-          .send({
-            emailOrUsername: 'test@example.com',
-            password: 'wrongpassword',
-          })
-          .expect(401);
-      });
+      expect(user.password).not.toBe(testUser.password);
+      const isPasswordValid = await bcrypt.compare(testUser.password, user.password);
+      expect(isPasswordValid).toBe(true);
     });
 
-    describe('POST /auth/refresh', () => {
-      let refreshToken: string;
+    it('should prevent duplicate email registration', async () => {
+      await authService.register(testUser);
 
-      beforeAll(async () => {
-        const response = await request(app.getHttpServer())
-          .post('/auth/login')
-          .send({
-            emailOrUsername: 'test@example.com',
-            password: 'SecureP@ssw0rd!',
-          });
+      await expect(
+        authService.register({ ...testUser, username: 'different' }),
+      ).rejects.toThrow('User with this email already exists');
+    });
 
-        refreshToken = response.body.refreshToken;
-      });
+    it('should prevent duplicate username registration', async () => {
+      await authService.register(testUser);
 
-      it('should refresh tokens', async () => {
-        const response = await request(app.getHttpServer())
-          .post('/auth/refresh')
-          .send({ refreshToken })
-          .expect(200);
+      await expect(
+        authService.register({ ...testUser, email: 'different@example.com' }),
+      ).rejects.toThrow('Username already taken');
+    });
 
-        expect(response.body).toMatchObject({
-          accessToken: expect.any(String),
-          refreshToken: expect.any(String),
-        });
+    it('should set default role and subscription type', async () => {
+      const result = await authService.register(testUser);
 
-        expect(response.body.refreshToken).not.toBe(refreshToken);
-      });
-
-      it('should fail with invalid refresh token', async () => {
-        await request(app.getHttpServer())
-          .post('/auth/refresh')
-          .send({ refreshToken: 'invalid.token' })
-          .expect(401);
-      });
+      expect(result.user.role).toBe(UserRole.USER);
+      expect(result.user.subscriptionType).toBe(SubscriptionType.FREE);
     });
   });
 
-  describe('User Endpoints', () => {
-    describe('GET /users/me', () => {
-      it('should get current user profile', async () => {
-        const response = await request(app.getHttpServer())
-          .get('/users/me')
-          .set('Authorization', `Bearer ${authToken}`)
-          .expect(200);
+  describe('User Login Flow', () => {
+    beforeEach(async () => {
+      await authService.register(testUser);
+    });
 
-        expect(response.body).toMatchObject({
-          email: 'test@example.com',
-          username: 'testuser',
-          firstName: 'Test',
-          lastName: 'User',
-        });
+    it('should login with valid credentials', async () => {
+      const result = await authService.login(testUser.email, testUser.password);
+
+      expect(result).toHaveProperty('user');
+      expect(result).toHaveProperty('tokens');
+      expect(result.user.email).toBe(testUser.email);
+    });
+
+    it('should update last login timestamp', async () => {
+      const loginResult = await authService.login(testUser.email, testUser.password);
+      const user = await userRepository.findById(loginResult.user.id);
+
+      expect(user.lastLoginAt).toBeDefined();
+      expect(user.lastLoginAt).toBeInstanceOf(Date);
+    });
+
+    it('should reject invalid password', async () => {
+      await expect(
+        authService.login(testUser.email, 'WrongPassword'),
+      ).rejects.toThrow('Invalid credentials');
+    });
+
+    it('should reject non-existent user', async () => {
+      await expect(
+        authService.login('nonexistent@example.com', testUser.password),
+      ).rejects.toThrow('Invalid credentials');
+    });
+
+    it('should handle account locking after failed attempts', async () => {
+      // Make multiple failed login attempts
+      for (let i = 0; i < 5; i++) {
+        try {
+          await authService.login(testUser.email, 'WrongPassword');
+        } catch (error) {
+          // Expected to fail
+        }
+      }
+
+      // Account should be locked now
+      await expect(
+        authService.login(testUser.email, testUser.password),
+      ).rejects.toThrow('Account is locked');
+    });
+  });
+
+  describe('Token Management', () => {
+    let userId: string;
+    let refreshToken: string;
+
+    beforeEach(async () => {
+      const result = await authService.register(testUser);
+      userId = result.user.id;
+      refreshToken = result.tokens.refreshToken;
+    });
+
+    it('should refresh tokens with valid refresh token', async () => {
+      const result = await authService.refreshTokens(userId, refreshToken);
+
+      expect(result).toHaveProperty('accessToken');
+      expect(result).toHaveProperty('refreshToken');
+      expect(result.refreshToken).not.toBe(refreshToken); // Should be rotated
+    });
+
+    it('should invalidate old refresh token after use', async () => {
+      await authService.refreshTokens(userId, refreshToken);
+
+      // Try to use the old refresh token again
+      await expect(
+        authService.refreshTokens(userId, refreshToken),
+      ).rejects.toThrow('Invalid refresh token');
+    });
+
+    it('should logout and remove all refresh tokens', async () => {
+      await authService.logout(userId);
+
+      await expect(
+        authService.refreshTokens(userId, refreshToken),
+      ).rejects.toThrow('Invalid refresh token');
+    });
+  });
+
+  describe('Email Verification', () => {
+    let userId: string;
+    let verificationToken: string;
+
+    beforeEach(async () => {
+      const result = await authService.register(testUser);
+      userId = result.user.id;
+      
+      // Get verification token from user
+      const user = await userRepository.findById(userId);
+      verificationToken = user.emailVerificationToken;
+    });
+
+    it('should verify email with valid token', async () => {
+      const result = await authService.verifyEmail(verificationToken);
+
+      expect(result.emailVerified).toBe(true);
+      expect(result.emailVerificationToken).toBeUndefined();
+    });
+
+    it('should reject invalid verification token', async () => {
+      await expect(
+        authService.verifyEmail('invalid-token'),
+      ).rejects.toThrow('Invalid or expired verification token');
+    });
+
+    it('should reject expired verification token', async () => {
+      // Update token expiry to past
+      await userRepository.update(userId, {
+        emailVerificationExpires: new Date(Date.now() - 1000),
       });
 
-      it('should fail without auth token', async () => {
-        await request(app.getHttpServer())
-          .get('/users/me')
-          .expect(401);
+      await expect(
+        authService.verifyEmail(verificationToken),
+      ).rejects.toThrow('Invalid or expired verification token');
+    });
+  });
+
+  describe('Password Reset Flow', () => {
+    let userId: string;
+
+    beforeEach(async () => {
+      const result = await authService.register(testUser);
+      userId = result.user.id;
+    });
+
+    it('should initiate password reset', async () => {
+      await authService.forgotPassword(testUser.email);
+
+      const user = await userRepository.findById(userId);
+      expect(user.resetPasswordToken).toBeDefined();
+      expect(user.resetPasswordExpires).toBeDefined();
+    });
+
+    it('should reset password with valid token', async () => {
+      await authService.forgotPassword(testUser.email);
+      
+      const user = await userRepository.findById(userId);
+      const resetToken = user.resetPasswordToken;
+
+      const newPassword = 'NewPassword123!';
+      await authService.resetPassword(resetToken, newPassword);
+
+      // Should be able to login with new password
+      const loginResult = await authService.login(testUser.email, newPassword);
+      expect(loginResult).toBeDefined();
+    });
+
+    it('should invalidate reset token after use', async () => {
+      await authService.forgotPassword(testUser.email);
+      
+      const user = await userRepository.findById(userId);
+      const resetToken = user.resetPasswordToken;
+
+      await authService.resetPassword(resetToken, 'NewPassword123!');
+
+      // Try to use the same token again
+      await expect(
+        authService.resetPassword(resetToken, 'AnotherPassword123!'),
+      ).rejects.toThrow('Invalid or expired reset token');
+    });
+  });
+
+  describe('User Profile Management', () => {
+    let userId: string;
+
+    beforeEach(async () => {
+      const result = await authService.register(testUser);
+      userId = result.user.id;
+    });
+
+    it('should update user profile', async () => {
+      const updateData = {
+        firstName: 'Updated',
+        lastName: 'Name',
+        phone: '+9876543210',
+        bio: 'Test bio',
+        location: 'Test City',
+      };
+
+      const result = await userService.update(userId, updateData);
+
+      expect(result.firstName).toBe(updateData.firstName);
+      expect(result.lastName).toBe(updateData.lastName);
+      expect(result.phone).toBe(updateData.phone);
+      expect(result.bio).toBe(updateData.bio);
+    });
+
+    it('should not update protected fields', async () => {
+      const updateData = {
+        email: 'newemail@example.com',
+        role: UserRole.ADMIN,
+        emailVerified: true,
+      };
+
+      await userService.update(userId, updateData);
+
+      const user = await userRepository.findById(userId);
+      expect(user.email).toBe(testUser.email); // Should not change
+      expect(user.role).toBe(UserRole.USER); // Should not change
+      expect(user.emailVerified).toBe(false); // Should not change
+    });
+
+    it('should change password', async () => {
+      const newPassword = 'NewPassword123!';
+      
+      await userService.changePassword(userId, {
+        currentPassword: testUser.password,
+        newPassword,
+      });
+
+      // Should be able to login with new password
+      const loginResult = await authService.login(testUser.email, newPassword);
+      expect(loginResult).toBeDefined();
+    });
+
+    it('should reject password change with wrong current password', async () => {
+      await expect(
+        userService.changePassword(userId, {
+          currentPassword: 'WrongPassword',
+          newPassword: 'NewPassword123!',
+        }),
+      ).rejects.toThrow('Current password is incorrect');
+    });
+  });
+
+  describe('User Search and Filtering', () => {
+    beforeEach(async () => {
+      // Create multiple users
+      await authService.register(testUser);
+      await authService.register({
+        ...testUser,
+        email: 'user2@example.com',
+        username: 'user2',
+      });
+      await authService.register({
+        ...testUser,
+        email: 'admin@example.com',
+        username: 'admin',
       });
     });
 
-    describe('PUT /users/me', () => {
-      it('should update current user profile', async () => {
-        const updateDto = {
-          firstName: 'Updated',
-          lastName: 'Name',
-          phone: '+1234567890',
-        };
+    it('should search users by email', async () => {
+      const result = await userService.findPaginated(
+        { email: 'user2@example.com' },
+        1,
+        10,
+      );
 
-        const response = await request(app.getHttpServer())
-          .put('/users/me')
-          .set('Authorization', `Bearer ${authToken}`)
-          .send(updateDto)
-          .expect(200);
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].email).toBe('user2@example.com');
+    });
 
-        expect(response.body).toMatchObject({
-          firstName: 'Updated',
-          lastName: 'Name',
-          phone: '1234567890',
-        });
-      });
+    it('should search users by partial match', async () => {
+      const result = await userService.findPaginated(
+        { $or: [
+          { email: { $regex: 'example.com', $options: 'i' } },
+        ]},
+        1,
+        10,
+      );
 
-      it('should fail with invalid data', async () => {
-        const updateDto = {
-          email: 'invalid-email',
-        };
-
-        await request(app.getHttpServer())
-          .put('/users/me')
-          .set('Authorization', `Bearer ${authToken}`)
-          .send(updateDto)
-          .expect(400);
+      expect(result.items.length).toBeGreaterThan(0);
+      result.items.forEach(user => {
+        expect(user.email).toContain('example.com');
       });
     });
 
-    describe('POST /users/me/change-password', () => {
-      it('should change password', async () => {
-        await request(app.getHttpServer())
-          .post('/users/me/change-password')
-          .set('Authorization', `Bearer ${authToken}`)
-          .send({
-            currentPassword: 'SecureP@ssw0rd!',
-            newPassword: 'NewSecureP@ssw0rd!',
-          })
-          .expect(204);
+    it('should handle pagination correctly', async () => {
+      const page1 = await userService.findPaginated({}, 1, 2);
+      const page2 = await userService.findPaginated({}, 2, 2);
 
-        // Verify can login with new password
-        await request(app.getHttpServer())
-          .post('/auth/login')
-          .send({
-            emailOrUsername: 'test@example.com',
-            password: 'NewSecureP@ssw0rd!',
-          })
-          .expect(200);
+      expect(page1.items).toHaveLength(2);
+      expect(page2.items).toHaveLength(1);
+      expect(page1.page).toBe(1);
+      expect(page2.page).toBe(2);
+      expect(page1.totalPages).toBe(2);
+    });
+  });
+
+  describe('OAuth Integration', () => {
+    it('should handle Google OAuth login', async () => {
+      const googleProfile = {
+        id: 'google123',
+        email: 'oauth@example.com',
+        firstName: 'OAuth',
+        lastName: 'User',
+        picture: 'https://example.com/picture.jpg',
+        emailVerified: true,
+      };
+
+      const result = await authService.oauthLogin('google', googleProfile);
+
+      expect(result).toHaveProperty('user');
+      expect(result).toHaveProperty('tokens');
+      expect(result.user.email).toBe(googleProfile.email);
+      expect(result.user.emailVerified).toBe(true);
+      expect(result.user.authProviders).toContainEqual({
+        provider: 'google',
+        providerId: googleProfile.id,
       });
+    });
 
-      it('should fail with incorrect current password', async () => {
-        await request(app.getHttpServer())
-          .post('/users/me/change-password')
-          .set('Authorization', `Bearer ${authToken}`)
-          .send({
-            currentPassword: 'wrongpassword',
-            newPassword: 'NewSecureP@ssw0rd!',
-          })
-          .expect(401);
+    it('should link OAuth account to existing user', async () => {
+      // Create user with email/password
+      const result = await authService.register(testUser);
+      const userId = result.user.id;
+
+      // Link Google account
+      const googleProfile = {
+        id: 'google123',
+        email: testUser.email,
+        emailVerified: true,
+      };
+
+      await authService.linkOAuthAccount(userId, 'google', googleProfile);
+
+      const user = await userRepository.findById(userId);
+      expect(user.authProviders).toContainEqual({
+        provider: 'google',
+        providerId: googleProfile.id,
       });
     });
   });
 
-  describe('Admin Endpoints', () => {
-    describe('GET /users', () => {
-      it('should get all users (admin only)', async () => {
-        const response = await request(app.getHttpServer())
-          .get('/users')
-          .set('Authorization', `Bearer ${adminToken}`)
-          .query({ limit: 10 })
-          .expect(200);
-
-        expect(response.body).toMatchObject({
-          data: expect.any(Array),
-          total: expect.any(Number),
-          page: 1,
-          totalPages: expect.any(Number),
-        });
-
-        expect(response.body.data.length).toBeGreaterThan(0);
+  describe('User Statistics', () => {
+    beforeEach(async () => {
+      // Create users with different attributes
+      await authService.register(testUser);
+      
+      const adminUser = await authService.register({
+        ...testUser,
+        email: 'admin@example.com',
+        username: 'admin',
+      });
+      await userRepository.update(adminUser.user.id, {
+        role: UserRole.ADMIN,
+        emailVerified: true,
       });
 
-      it('should fail for non-admin user', async () => {
-        await request(app.getHttpServer())
-          .get('/users')
-          .set('Authorization', `Bearer ${authToken}`)
-          .expect(403);
+      const premiumUser = await authService.register({
+        ...testUser,
+        email: 'premium@example.com',
+        username: 'premium',
       });
-
-      it('should filter users by search', async () => {
-        const response = await request(app.getHttpServer())
-          .get('/users')
-          .set('Authorization', `Bearer ${adminToken}`)
-          .query({ search: 'test' })
-          .expect(200);
-
-        expect(response.body.data.every((user: any) => 
-          user.email.includes('test') || 
-          user.username.includes('test') ||
-          user.firstName.includes('Test') ||
-          user.lastName.includes('Test')
-        )).toBe(true);
+      await userRepository.update(premiumUser.user.id, {
+        subscriptionType: SubscriptionType.PREMIUM,
+        emailVerified: true,
       });
     });
 
-    describe('PUT /users/:id', () => {
-      it('should update user by id (admin only)', async () => {
-        const response = await request(app.getHttpServer())
-          .put(`/users/${createdUserId}`)
-          .set('Authorization', `Bearer ${adminToken}`)
-          .send({
-            firstName: 'AdminUpdated',
-          })
-          .expect(200);
+    it('should calculate user statistics correctly', async () => {
+      const stats = await userService.getStats();
 
-        expect(response.body.firstName).toBe('AdminUpdated');
-      });
+      expect(stats.totalUsers).toBe(3);
+      expect(stats.verifiedUsers).toBe(2);
+      expect(stats.usersByRole[UserRole.USER]).toBe(2);
+      expect(stats.usersByRole[UserRole.ADMIN]).toBe(1);
+      expect(stats.usersBySubscription[SubscriptionType.FREE]).toBe(2);
+      expect(stats.usersBySubscription[SubscriptionType.PREMIUM]).toBe(1);
+    });
+  });
+
+  describe('Soft Delete and Restore', () => {
+    let userId: string;
+
+    beforeEach(async () => {
+      const result = await authService.register(testUser);
+      userId = result.user.id;
     });
 
-    describe('PATCH /users/:id/role', () => {
-      it('should update user role (admin only)', async () => {
-        const response = await request(app.getHttpServer())
-          .patch(`/users/${createdUserId}/role`)
-          .set('Authorization', `Bearer ${adminToken}`)
-          .send({
-            role: UserRole.MODERATOR,
-          })
-          .expect(200);
+    it('should soft delete user', async () => {
+      await userService.delete(userId);
 
-        expect(response.body.role).toBe(UserRole.MODERATOR);
-      });
+      const user = await userRepository.findById(userId);
+      expect(user.isDeleted).toBe(true);
+      expect(user.deletedAt).toBeDefined();
     });
 
-    describe('DELETE /users/:id', () => {
-      it('should soft delete user (admin only)', async () => {
-        await request(app.getHttpServer())
-          .delete(`/users/${createdUserId}`)
-          .set('Authorization', `Bearer ${adminToken}`)
-          .expect(204);
+    it('should exclude soft deleted users from normal queries', async () => {
+      await userService.delete(userId);
 
-        // Verify user is soft deleted
-        const user = await mongoConnection
-          .collection('users')
-          .findOne({ _id: createdUserId });
-        
-        expect(user?.isDeleted).toBe(true);
-      });
+      const result = await userService.findPaginated({}, 1, 10);
+      expect(result.items).toHaveLength(0);
     });
 
-    describe('POST /users/:id/restore', () => {
-      it('should restore deleted user (admin only)', async () => {
-        const response = await request(app.getHttpServer())
-          .post(`/users/${createdUserId}/restore`)
-          .set('Authorization', `Bearer ${adminToken}`)
-          .expect(200);
+    it('should restore soft deleted user', async () => {
+      await userService.delete(userId);
+      const restored = await userService.restore(userId);
 
-        expect(response.body.isDeleted).toBe(false);
-      });
+      expect(restored.isDeleted).toBe(false);
+      expect(restored.deletedAt).toBeUndefined();
+    });
+
+    it('should prevent login for soft deleted users', async () => {
+      await userService.delete(userId);
+
+      await expect(
+        authService.login(testUser.email, testUser.password),
+      ).rejects.toThrow('Account has been deleted');
     });
   });
 });

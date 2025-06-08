@@ -1,43 +1,117 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ConfigService } from '@nestjs/config';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { AquariumController } from './aquarium.controller';
 import { AquariumService } from '../services/aquarium.service';
-import { AuthGuard } from '@nestjs/passport';
-import { WaterType, AquariumStatus, EquipmentType, InhabitantType, SubscriptionType } from '@verpa/common';
+import { StorageService } from '../../infrastructure/storage/storage.service';
+import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { CreateAquariumDto } from '../dto/create-aquarium.dto';
+import { UpdateAquariumDto } from '../dto/update-aquarium.dto';
+import { AddEquipmentDto } from '../dto/add-equipment.dto';
+import { AddInhabitantDto } from '../dto/add-inhabitant.dto';
+import { RecordParametersDto } from '../dto/record-parameters.dto';
+import { AquariumType, WaterType, SubscriptionType, EquipmentType, InhabitantCategory } from '@verpa/common';
+import { NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 
 describe('AquariumController', () => {
   let controller: AquariumController;
   let aquariumService: jest.Mocked<AquariumService>;
+  let storageService: jest.Mocked<StorageService>;
+
+  const mockUser = {
+    id: 'user123',
+    email: 'test@example.com',
+    subscriptionType: SubscriptionType.PREMIUM,
+  };
+
+  const mockAquarium = {
+    id: 'aquarium123',
+    userId: mockUser.id,
+    name: 'Test Tank',
+    type: AquariumType.FRESHWATER,
+    volume: 100,
+    volumeUnit: 'liters',
+    dimensions: {
+      length: 100,
+      width: 40,
+      height: 50,
+      unit: 'cm',
+    },
+    waterType: WaterType.FRESHWATER,
+    description: 'Test aquarium',
+    location: 'Living Room',
+    equipment: [],
+    inhabitants: [],
+    waterParameters: [],
+    healthScore: 85,
+    isActive: true,
+    isPublic: false,
+    createdAt: new Date('2024-01-01'),
+    updatedAt: new Date('2024-01-01'),
+  };
+
+  const mockEquipment = {
+    id: 'equipment123',
+    name: 'Test Filter',
+    type: EquipmentType.FILTER,
+    brand: 'TestBrand',
+    model: 'TestModel',
+    purchaseDate: new Date('2024-01-01'),
+    warrantyExpiry: new Date('2025-01-01'),
+    isActive: true,
+    lastMaintenance: null,
+    nextMaintenance: new Date('2024-02-01'),
+  };
+
+  const mockInhabitant = {
+    id: 'inhabitant123',
+    species: 'Betta splendens',
+    commonName: 'Siamese Fighting Fish',
+    category: InhabitantCategory.FISH,
+    quantity: 1,
+    sex: 'male',
+    addedDate: new Date('2024-01-01'),
+    notes: 'Beautiful blue halfmoon',
+    origin: 'Local pet store',
+    healthStatus: 'healthy',
+  };
+
+  const mockParameters = {
+    id: 'params123',
+    temperature: 78,
+    ph: 7.2,
+    ammonia: 0,
+    nitrite: 0,
+    nitrate: 10,
+    recordedAt: new Date('2024-01-01'),
+  };
 
   const mockAquariumService = {
     create: jest.fn(),
     findAll: jest.fn(),
+    findPublicAquariums: jest.fn(),
+    getUserStats: jest.fn(),
     findOne: jest.fn(),
-    findPublic: jest.fn(),
     update: jest.fn(),
-    remove: jest.fn(),
-    uploadImage: jest.fn(),
+    delete: jest.fn(),
+    restore: jest.fn(),
+    updateImage: jest.fn(),
+    deleteImage: jest.fn(),
     addEquipment: jest.fn(),
-    updateEquipmentMaintenance: jest.fn(),
+    updateEquipment: jest.fn(),
     removeEquipment: jest.fn(),
+    performEquipmentMaintenance: jest.fn(),
     addInhabitant: jest.fn(),
     updateInhabitant: jest.fn(),
     removeInhabitant: jest.fn(),
-    uploadInhabitantImage: jest.fn(),
-    recordParameters: jest.fn(),
-    getParametersHistory: jest.fn(),
+    recordWaterParameters: jest.fn(),
+    getParameterHistory: jest.fn(),
+    getLatestParameters: jest.fn(),
     getParameterTrends: jest.fn(),
-    getMaintenanceSchedule: jest.fn(),
-    checkCompatibility: jest.fn(),
+    getHealthStatus: jest.fn(),
   };
 
-  const mockRequest = {
-    user: {
-      sub: 'user123',
-      email: 'test@example.com',
-      subscriptionType: SubscriptionType.BASIC,
-    },
+  const mockStorageService = {
+    uploadAquariumImage: jest.fn(),
+    deleteAquariumImage: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -48,590 +122,703 @@ describe('AquariumController', () => {
           provide: AquariumService,
           useValue: mockAquariumService,
         },
+        {
+          provide: StorageService,
+          useValue: mockStorageService,
+        },
       ],
-    }).compile();
+    })
+      .overrideGuard(JwtAuthGuard)
+      .useValue({ canActivate: jest.fn().mockReturnValue(true) })
+      .compile();
 
     controller = module.get<AquariumController>(AquariumController);
     aquariumService = module.get(AquariumService);
+    storageService = module.get(StorageService);
 
     jest.clearAllMocks();
   });
 
+  it('should be defined', () => {
+    expect(controller).toBeDefined();
+  });
+
   describe('create', () => {
-    const createDto = {
-      name: 'Test Tank',
-      waterType: WaterType.FRESHWATER,
+    const createDto: CreateAquariumDto = {
+      name: 'New Tank',
+      type: AquariumType.FRESHWATER,
       volume: 100,
-      description: 'Test description',
+      volumeUnit: 'liters',
+      dimensions: {
+        length: 100,
+        width: 40,
+        height: 50,
+        unit: 'cm',
+      },
+      waterType: WaterType.FRESHWATER,
+      description: 'New aquarium',
+      location: 'Living Room',
     };
 
-    it('should create aquarium', async () => {
-      const aquarium = {
-        id: 'aqua123',
-        userId: 'user123',
-        ...createDto,
-        status: AquariumStatus.ACTIVE,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
+    it('should create a new aquarium', async () => {
+      aquariumService.create.mockResolvedValue(mockAquarium);
 
-      mockAquariumService.create.mockResolvedValue(aquarium);
+      const result = await controller.create(createDto, mockUser);
 
-      const result = await controller.create(createDto, mockRequest);
-
-      expect(result).toEqual(aquarium);
+      expect(result).toEqual(mockAquarium);
       expect(aquariumService.create).toHaveBeenCalledWith(
-        'user123',
+        mockUser.id,
         createDto,
-        SubscriptionType.BASIC
+        mockUser.subscriptionType,
       );
     });
 
-    it('should handle validation errors', async () => {
-      mockAquariumService.create.mockRejectedValue(
-        new BadRequestException('Invalid data')
+    it('should throw BadRequestException for limit reached', async () => {
+      aquariumService.create.mockRejectedValue(
+        new BadRequestException('Aquarium limit reached for your subscription'),
       );
 
-      await expect(
-        controller.create(createDto, mockRequest)
-      ).rejects.toThrow(BadRequestException);
+      await expect(controller.create(createDto, mockUser)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('should throw BadRequestException for duplicate name', async () => {
+      aquariumService.create.mockRejectedValue(
+        new BadRequestException('Aquarium with this name already exists'),
+      );
+
+      await expect(controller.create(createDto, mockUser)).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 
   describe('findAll', () => {
-    it('should return user aquariums', async () => {
-      const aquariums = [
-        {
-          id: 'aqua1',
-          userId: 'user123',
-          name: 'Tank 1',
-          waterType: WaterType.FRESHWATER,
-          volume: 100,
-          status: AquariumStatus.ACTIVE,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-        {
-          id: 'aqua2',
-          userId: 'user123',
-          name: 'Tank 2',
-          waterType: WaterType.SALTWATER,
-          volume: 200,
-          status: AquariumStatus.ACTIVE,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-      ];
+    const mockPaginatedResult = {
+      items: [mockAquarium],
+      total: 1,
+      page: 1,
+      limit: 10,
+      totalPages: 1,
+      hasNext: false,
+      hasPrev: false,
+    };
 
-      mockAquariumService.findAll.mockResolvedValue(aquariums);
+    it('should return all user aquariums with filters', async () => {
+      aquariumService.findAll.mockResolvedValue(mockPaginatedResult);
 
-      const result = await controller.findAll({}, mockRequest);
+      const result = await controller.findAll(
+        mockUser,
+        WaterType.FRESHWATER,
+        false,
+        1,
+        10,
+        'name',
+        'asc',
+      );
 
-      expect(result).toEqual(aquariums);
-      expect(aquariumService.findAll).toHaveBeenCalledWith('user123', {});
+      expect(result).toEqual(mockPaginatedResult);
+      expect(aquariumService.findAll).toHaveBeenCalledWith({
+        userId: mockUser.id,
+        waterType: WaterType.FRESHWATER,
+        includeDeleted: false,
+        page: 1,
+        limit: 10,
+        sortBy: 'name',
+        sortOrder: 'asc',
+      });
     });
 
-    it('should pass query parameters', async () => {
-      mockAquariumService.findAll.mockResolvedValue([]);
+    it('should handle default pagination parameters', async () => {
+      aquariumService.findAll.mockResolvedValue(mockPaginatedResult);
 
-      const query = {
-        status: AquariumStatus.MAINTENANCE,
-        page: '2',
-        limit: '20',
-      };
+      await controller.findAll(mockUser);
 
-      await controller.findAll(query, mockRequest);
-
-      expect(aquariumService.findAll).toHaveBeenCalledWith('user123', {
-        status: AquariumStatus.MAINTENANCE,
-        page: 2,
-        limit: 20,
+      expect(aquariumService.findAll).toHaveBeenCalledWith({
+        userId: mockUser.id,
+        waterType: undefined,
+        includeDeleted: undefined,
+        page: undefined,
+        limit: undefined,
+        sortBy: undefined,
+        sortOrder: undefined,
       });
+    });
+
+    it('should return empty list when no aquariums', async () => {
+      aquariumService.findAll.mockResolvedValue({
+        ...mockPaginatedResult,
+        items: [],
+        total: 0,
+      });
+
+      const result = await controller.findAll(mockUser);
+
+      expect(result.items).toHaveLength(0);
+      expect(result.total).toBe(0);
     });
   });
 
   describe('findPublic', () => {
+    const mockPublicAquariums = {
+      items: [{ ...mockAquarium, isPublic: true }],
+      total: 1,
+      page: 1,
+      limit: 10,
+      totalPages: 1,
+    };
+
     it('should return public aquariums', async () => {
-      const publicAquariums = [
-        {
-          id: 'aqua1',
-          userId: 'user1',
-          name: 'Public Tank 1',
-          waterType: WaterType.FRESHWATER,
-          volume: 100,
-          status: AquariumStatus.ACTIVE,
-          isPublic: true,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        },
-      ];
+      aquariumService.findPublicAquariums.mockResolvedValue(mockPublicAquariums);
 
-      mockAquariumService.findPublic.mockResolvedValue(publicAquariums);
+      const result = await controller.findPublic(WaterType.SALTWATER, 1, 10);
 
-      const result = await controller.findPublic({});
+      expect(result).toEqual(mockPublicAquariums);
+      expect(aquariumService.findPublicAquariums).toHaveBeenCalledWith({
+        waterType: WaterType.SALTWATER,
+        page: 1,
+        limit: 10,
+      });
+    });
+  });
 
-      expect(result).toEqual(publicAquariums);
-      expect(aquariumService.findPublic).toHaveBeenCalledWith({});
+  describe('getStats', () => {
+    const mockStats = {
+      totalAquariums: 5,
+      activeAquariums: 4,
+      totalVolume: 500,
+      aquariumsByType: {
+        [AquariumType.FRESHWATER]: 3,
+        [AquariumType.SALTWATER]: 2,
+      },
+      averageHealthScore: 82.5,
+      parametersRecordedToday: 3,
+      maintenanceDue: 2,
+    };
+
+    it('should return user aquarium statistics', async () => {
+      aquariumService.getUserStats.mockResolvedValue(mockStats);
+
+      const result = await controller.getStats(mockUser);
+
+      expect(result).toEqual(mockStats);
+      expect(aquariumService.getUserStats).toHaveBeenCalledWith(mockUser.id);
     });
   });
 
   describe('findOne', () => {
-    it('should return aquarium by id', async () => {
-      const aquarium = {
-        id: 'aqua123',
-        userId: 'user123',
-        name: 'Test Tank',
-        waterType: WaterType.FRESHWATER,
-        volume: 100,
-        status: AquariumStatus.ACTIVE,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
+    it('should return aquarium by ID', async () => {
+      aquariumService.findOne.mockResolvedValue(mockAquarium);
 
-      mockAquariumService.findOne.mockResolvedValue(aquarium);
+      const result = await controller.findOne(mockAquarium.id, mockUser);
 
-      const result = await controller.findOne('aqua123', mockRequest);
-
-      expect(result).toEqual(aquarium);
-      expect(aquariumService.findOne).toHaveBeenCalledWith('aqua123', 'user123');
+      expect(result).toEqual(mockAquarium);
+      expect(aquariumService.findOne).toHaveBeenCalledWith(mockAquarium.id, mockUser.id);
     });
 
-    it('should handle not found', async () => {
-      mockAquariumService.findOne.mockRejectedValue(
-        new NotFoundException('Aquarium not found')
+    it('should throw NotFoundException for non-existent aquarium', async () => {
+      aquariumService.findOne.mockRejectedValue(new NotFoundException('Aquarium not found'));
+
+      await expect(controller.findOne('nonexistent', mockUser)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('should throw ForbiddenException for unauthorized access', async () => {
+      aquariumService.findOne.mockRejectedValue(
+        new ForbiddenException('Access denied'),
       );
 
-      await expect(
-        controller.findOne('non-existent', mockRequest)
-      ).rejects.toThrow(NotFoundException);
+      await expect(controller.findOne(mockAquarium.id, { id: 'other-user' })).rejects.toThrow(
+        ForbiddenException,
+      );
     });
   });
 
   describe('update', () => {
-    const updateDto = {
+    const updateDto: UpdateAquariumDto = {
       name: 'Updated Tank',
-      volume: 150,
+      description: 'Updated description',
     };
 
     it('should update aquarium', async () => {
-      const updatedAquarium = {
-        id: 'aqua123',
-        userId: 'user123',
-        name: 'Updated Tank',
-        waterType: WaterType.FRESHWATER,
-        volume: 150,
-        status: AquariumStatus.ACTIVE,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
+      const updatedAquarium = { ...mockAquarium, ...updateDto };
+      aquariumService.update.mockResolvedValue(updatedAquarium);
 
-      mockAquariumService.update.mockResolvedValue(updatedAquarium);
-
-      const result = await controller.update('aqua123', updateDto, mockRequest);
+      const result = await controller.update(mockAquarium.id, updateDto, mockUser);
 
       expect(result).toEqual(updatedAquarium);
       expect(aquariumService.update).toHaveBeenCalledWith(
-        'aqua123',
-        'user123',
-        updateDto
+        mockAquarium.id,
+        mockUser.id,
+        updateDto,
+      );
+    });
+
+    it('should throw NotFoundException for non-existent aquarium', async () => {
+      aquariumService.update.mockRejectedValue(new NotFoundException('Aquarium not found'));
+
+      await expect(
+        controller.update('nonexistent', updateDto, mockUser),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('delete', () => {
+    it('should delete aquarium', async () => {
+      aquariumService.delete.mockResolvedValue(undefined);
+
+      await expect(
+        controller.delete(mockAquarium.id, mockUser),
+      ).resolves.toBeUndefined();
+
+      expect(aquariumService.delete).toHaveBeenCalledWith(mockAquarium.id, mockUser.id);
+    });
+
+    it('should throw NotFoundException for non-existent aquarium', async () => {
+      aquariumService.delete.mockRejectedValue(new NotFoundException('Aquarium not found'));
+
+      await expect(controller.delete('nonexistent', mockUser)).rejects.toThrow(
+        NotFoundException,
       );
     });
   });
 
-  describe('remove', () => {
-    it('should delete aquarium', async () => {
-      mockAquariumService.remove.mockResolvedValue(undefined);
+  describe('restore', () => {
+    it('should restore deleted aquarium', async () => {
+      const restoredAquarium = { ...mockAquarium, deletedAt: null };
+      aquariumService.restore.mockResolvedValue(restoredAquarium);
 
-      await controller.remove('aqua123', mockRequest);
+      const result = await controller.restore(mockAquarium.id, mockUser);
 
-      expect(aquariumService.remove).toHaveBeenCalledWith('aqua123', 'user123');
+      expect(result).toEqual(restoredAquarium);
+      expect(aquariumService.restore).toHaveBeenCalledWith(mockAquarium.id, mockUser.id);
+    });
+
+    it('should throw BadRequestException if aquarium not deleted', async () => {
+      aquariumService.restore.mockRejectedValue(
+        new BadRequestException('Aquarium is not deleted'),
+      );
+
+      await expect(controller.restore(mockAquarium.id, mockUser)).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 
   describe('uploadImage', () => {
-    it('should upload image', async () => {
-      const file = {
-        buffer: Buffer.from('fake-image'),
-        mimetype: 'image/jpeg',
-        originalname: 'test.jpg',
-        size: 1000,
-      } as Express.Multer.File;
+    const mockFile = {
+      buffer: Buffer.from('test'),
+      mimetype: 'image/jpeg',
+      originalname: 'test.jpg',
+      size: 1000,
+    } as Express.Multer.File;
 
-      const aquarium = {
-        id: 'aqua123',
-        userId: 'user123',
-        name: 'Test Tank',
-        waterType: WaterType.FRESHWATER,
-        volume: 100,
-        status: AquariumStatus.ACTIVE,
-        imageUrl: 'https://storage.example.com/aquarium/aqua123/image.jpg',
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
+    it('should upload aquarium image', async () => {
+      const imageUrl = 'https://storage.example.com/aquarium123.jpg';
+      const updatedAquarium = { ...mockAquarium, imageUrl };
+      
+      storageService.uploadAquariumImage.mockResolvedValue(imageUrl);
+      aquariumService.updateImage.mockResolvedValue(updatedAquarium);
 
-      mockAquariumService.uploadImage.mockResolvedValue(aquarium);
+      const result = await controller.uploadImage(mockAquarium.id, mockFile, mockUser);
 
-      const result = await controller.uploadImage('aqua123', file, mockRequest);
-
-      expect(result).toEqual(aquarium);
-      expect(aquariumService.uploadImage).toHaveBeenCalledWith(
-        'aqua123',
-        'user123',
-        file
+      expect(result).toEqual(updatedAquarium);
+      expect(storageService.uploadAquariumImage).toHaveBeenCalledWith(
+        mockAquarium.id,
+        mockFile.buffer,
+        mockFile.mimetype,
+      );
+      expect(aquariumService.updateImage).toHaveBeenCalledWith(
+        mockAquarium.id,
+        mockUser.id,
+        imageUrl,
       );
     });
 
-    it('should reject missing file', async () => {
+    it('should throw BadRequestException when no file uploaded', async () => {
       await expect(
-        controller.uploadImage('aqua123', undefined as any, mockRequest)
+        controller.uploadImage(mockAquarium.id, null as any, mockUser),
       ).rejects.toThrow(BadRequestException);
     });
+
+    it('should handle storage service errors', async () => {
+      storageService.uploadAquariumImage.mockRejectedValue(
+        new Error('Storage service error'),
+      );
+
+      await expect(
+        controller.uploadImage(mockAquarium.id, mockFile, mockUser),
+      ).rejects.toThrow('Storage service error');
+    });
   });
 
-  describe('addEquipment', () => {
-    const equipmentDto = {
-      name: 'Test Filter',
-      type: EquipmentType.FILTER,
-      brand: 'TestBrand',
-      model: 'TestModel',
-    };
+  describe('deleteImage', () => {
+    it('should delete aquarium image', async () => {
+      aquariumService.deleteImage.mockResolvedValue(undefined);
 
-    it('should add equipment', async () => {
-      const aquarium = {
-        id: 'aqua123',
-        userId: 'user123',
-        name: 'Test Tank',
-        waterType: WaterType.FRESHWATER,
-        volume: 100,
-        status: AquariumStatus.ACTIVE,
-        equipment: [
+      await expect(
+        controller.deleteImage(mockAquarium.id, mockUser),
+      ).resolves.toBeUndefined();
+
+      expect(aquariumService.deleteImage).toHaveBeenCalledWith(
+        mockAquarium.id,
+        mockUser.id,
+      );
+    });
+  });
+
+  describe('Equipment endpoints', () => {
+    describe('addEquipment', () => {
+      const addEquipmentDto: AddEquipmentDto = {
+        name: 'New Filter',
+        type: EquipmentType.FILTER,
+        brand: 'TestBrand',
+        model: 'TestModel',
+        purchaseDate: new Date('2024-01-01'),
+        warrantyExpiry: new Date('2025-01-01'),
+        notes: 'High performance filter',
+      };
+
+      it('should add equipment to aquarium', async () => {
+        const updatedAquarium = {
+          ...mockAquarium,
+          equipment: [...mockAquarium.equipment, mockEquipment],
+        };
+        aquariumService.addEquipment.mockResolvedValue(updatedAquarium);
+
+        const result = await controller.addEquipment(
+          mockAquarium.id,
+          addEquipmentDto,
+          mockUser,
+        );
+
+        expect(result).toEqual(updatedAquarium);
+        expect(aquariumService.addEquipment).toHaveBeenCalledWith(
+          mockAquarium.id,
+          mockUser.id,
+          addEquipmentDto,
+        );
+      });
+
+      it('should throw BadRequestException for limit reached', async () => {
+        aquariumService.addEquipment.mockRejectedValue(
+          new BadRequestException('Equipment limit reached'),
+        );
+
+        await expect(
+          controller.addEquipment(mockAquarium.id, addEquipmentDto, mockUser),
+        ).rejects.toThrow(BadRequestException);
+      });
+    });
+
+    describe('updateEquipment', () => {
+      const updateDto = { name: 'Updated Filter' };
+
+      it('should update equipment', async () => {
+        const updatedAquarium = { ...mockAquarium };
+        aquariumService.updateEquipment.mockResolvedValue(updatedAquarium);
+
+        const result = await controller.updateEquipment(
+          mockAquarium.id,
+          mockEquipment.id,
+          updateDto,
+          mockUser,
+        );
+
+        expect(result).toEqual(updatedAquarium);
+        expect(aquariumService.updateEquipment).toHaveBeenCalledWith(
+          mockAquarium.id,
+          mockUser.id,
+          mockEquipment.id,
+          updateDto,
+        );
+      });
+    });
+
+    describe('removeEquipment', () => {
+      it('should remove equipment', async () => {
+        aquariumService.removeEquipment.mockResolvedValue(undefined);
+
+        await expect(
+          controller.removeEquipment(mockAquarium.id, mockEquipment.id, mockUser),
+        ).resolves.toBeUndefined();
+
+        expect(aquariumService.removeEquipment).toHaveBeenCalledWith(
+          mockAquarium.id,
+          mockUser.id,
+          mockEquipment.id,
+        );
+      });
+    });
+
+    describe('performMaintenance', () => {
+      it('should record equipment maintenance', async () => {
+        const updatedAquarium = { ...mockAquarium };
+        aquariumService.performEquipmentMaintenance.mockResolvedValue(updatedAquarium);
+
+        const result = await controller.performMaintenance(
+          mockAquarium.id,
+          mockEquipment.id,
+          'Cleaned filter media',
+          mockUser,
+        );
+
+        expect(result).toEqual(updatedAquarium);
+        expect(aquariumService.performEquipmentMaintenance).toHaveBeenCalledWith(
+          mockAquarium.id,
+          mockUser.id,
+          mockEquipment.id,
+          'Cleaned filter media',
+        );
+      });
+    });
+  });
+
+  describe('Inhabitant endpoints', () => {
+    describe('addInhabitant', () => {
+      const addInhabitantDto: AddInhabitantDto = {
+        species: 'Corydoras paleatus',
+        commonName: 'Peppered Cory',
+        category: InhabitantCategory.FISH,
+        quantity: 6,
+        sex: 'mixed',
+        addedDate: new Date('2024-01-01'),
+        notes: 'School of 6',
+        origin: 'Local store',
+      };
+
+      it('should add inhabitant to aquarium', async () => {
+        const updatedAquarium = {
+          ...mockAquarium,
+          inhabitants: [...mockAquarium.inhabitants, mockInhabitant],
+        };
+        aquariumService.addInhabitant.mockResolvedValue(updatedAquarium);
+
+        const result = await controller.addInhabitant(
+          mockAquarium.id,
+          addInhabitantDto,
+          mockUser,
+        );
+
+        expect(result).toEqual(updatedAquarium);
+        expect(aquariumService.addInhabitant).toHaveBeenCalledWith(
+          mockAquarium.id,
+          mockUser.id,
+          addInhabitantDto,
+        );
+      });
+
+      it('should throw BadRequestException for compatibility issues', async () => {
+        aquariumService.addInhabitant.mockRejectedValue(
+          new BadRequestException('Incompatible with existing inhabitants'),
+        );
+
+        await expect(
+          controller.addInhabitant(mockAquarium.id, addInhabitantDto, mockUser),
+        ).rejects.toThrow(BadRequestException);
+      });
+    });
+
+    describe('updateInhabitant', () => {
+      const updateDto = { quantity: 5, notes: 'One passed away' };
+
+      it('should update inhabitant', async () => {
+        const updatedAquarium = { ...mockAquarium };
+        aquariumService.updateInhabitant.mockResolvedValue(updatedAquarium);
+
+        const result = await controller.updateInhabitant(
+          mockAquarium.id,
+          mockInhabitant.id,
+          updateDto,
+          mockUser,
+        );
+
+        expect(result).toEqual(updatedAquarium);
+        expect(aquariumService.updateInhabitant).toHaveBeenCalledWith(
+          mockAquarium.id,
+          mockUser.id,
+          mockInhabitant.id,
+          updateDto,
+        );
+      });
+    });
+
+    describe('removeInhabitant', () => {
+      it('should remove inhabitant', async () => {
+        aquariumService.removeInhabitant.mockResolvedValue(undefined);
+
+        await expect(
+          controller.removeInhabitant(mockAquarium.id, mockInhabitant.id, mockUser),
+        ).resolves.toBeUndefined();
+
+        expect(aquariumService.removeInhabitant).toHaveBeenCalledWith(
+          mockAquarium.id,
+          mockUser.id,
+          mockInhabitant.id,
+        );
+      });
+    });
+  });
+
+  describe('Water Parameters endpoints', () => {
+    describe('recordParameters', () => {
+      const parametersDto: RecordParametersDto = {
+        temperature: 78.5,
+        ph: 7.2,
+        ammonia: 0,
+        nitrite: 0,
+        nitrate: 15,
+        notes: 'After water change',
+      };
+
+      it('should record water parameters', async () => {
+        const updatedAquarium = {
+          ...mockAquarium,
+          waterParameters: [...mockAquarium.waterParameters, mockParameters],
+          healthScore: 90,
+        };
+        aquariumService.recordWaterParameters.mockResolvedValue(updatedAquarium);
+
+        const result = await controller.recordParameters(
+          mockAquarium.id,
+          parametersDto,
+          mockUser,
+        );
+
+        expect(result).toEqual(updatedAquarium);
+        expect(aquariumService.recordWaterParameters).toHaveBeenCalledWith(
+          mockAquarium.id,
+          mockUser.id,
+          parametersDto,
+        );
+      });
+
+      it('should throw BadRequestException for invalid parameters', async () => {
+        aquariumService.recordWaterParameters.mockRejectedValue(
+          new BadRequestException('Temperature out of valid range'),
+        );
+
+        await expect(
+          controller.recordParameters(mockAquarium.id, parametersDto, mockUser),
+        ).rejects.toThrow(BadRequestException);
+      });
+    });
+
+    describe('getParametersHistory', () => {
+      const mockHistory = [mockParameters];
+
+      it('should return parameters history with date filters', async () => {
+        aquariumService.getParameterHistory.mockResolvedValue(mockHistory);
+
+        const result = await controller.getParametersHistory(
+          mockAquarium.id,
+          mockUser,
+          '2024-01-01',
+          '2024-01-31',
+          50,
+        );
+
+        expect(result).toEqual(mockHistory);
+        expect(aquariumService.getParameterHistory).toHaveBeenCalledWith(
+          mockAquarium.id,
+          mockUser.id,
           {
-            id: 'equip123',
-            ...equipmentDto,
-            createdAt: new Date(),
+            from: new Date('2024-01-01'),
+            to: new Date('2024-01-31'),
+            limit: 50,
           },
-        ],
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
+        );
+      });
 
-      mockAquariumService.addEquipment.mockResolvedValue(aquarium);
+      it('should handle optional filters', async () => {
+        aquariumService.getParameterHistory.mockResolvedValue(mockHistory);
 
-      const result = await controller.addEquipment('aqua123', equipmentDto, mockRequest);
+        await controller.getParametersHistory(mockAquarium.id, mockUser);
 
-      expect(result).toEqual(aquarium);
-      expect(aquariumService.addEquipment).toHaveBeenCalledWith(
-        'aqua123',
-        'user123',
-        equipmentDto
-      );
+        expect(aquariumService.getParameterHistory).toHaveBeenCalledWith(
+          mockAquarium.id,
+          mockUser.id,
+          { limit: undefined },
+        );
+      });
     });
-  });
 
-  describe('updateEquipmentMaintenance', () => {
-    it('should update equipment maintenance', async () => {
-      const aquarium = {
-        id: 'aqua123',
-        userId: 'user123',
-        name: 'Test Tank',
-        waterType: WaterType.FRESHWATER,
-        volume: 100,
-        status: AquariumStatus.ACTIVE,
-        equipment: [
-          {
-            id: 'equip123',
-            name: 'Filter',
-            type: EquipmentType.FILTER,
-            lastMaintenanceDate: new Date(),
-            createdAt: new Date(),
-          },
-        ],
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
+    describe('getLatestParameters', () => {
+      it('should return latest parameters', async () => {
+        aquariumService.getLatestParameters.mockResolvedValue(mockParameters);
 
-      mockAquariumService.updateEquipmentMaintenance.mockResolvedValue(aquarium);
+        const result = await controller.getLatestParameters(mockAquarium.id, mockUser);
 
-      const result = await controller.updateEquipmentMaintenance(
-        'aqua123',
-        'equip123',
-        mockRequest
-      );
-
-      expect(result).toEqual(aquarium);
-      expect(aquariumService.updateEquipmentMaintenance).toHaveBeenCalledWith(
-        'aqua123',
-        'user123',
-        'equip123'
-      );
+        expect(result).toEqual(mockParameters);
+        expect(aquariumService.getLatestParameters).toHaveBeenCalledWith(
+          mockAquarium.id,
+          mockUser.id,
+        );
+      });
     });
-  });
 
-  describe('removeEquipment', () => {
-    it('should remove equipment', async () => {
-      const aquarium = {
-        id: 'aqua123',
-        userId: 'user123',
-        name: 'Test Tank',
-        waterType: WaterType.FRESHWATER,
-        volume: 100,
-        status: AquariumStatus.ACTIVE,
-        equipment: [],
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-
-      mockAquariumService.removeEquipment.mockResolvedValue(aquarium);
-
-      const result = await controller.removeEquipment('aqua123', 'equip123', mockRequest);
-
-      expect(result).toEqual(aquarium);
-      expect(aquariumService.removeEquipment).toHaveBeenCalledWith(
-        'aqua123',
-        'user123',
-        'equip123'
-      );
-    });
-  });
-
-  describe('addInhabitant', () => {
-    const inhabitantDto = {
-      name: 'Neon Tetra',
-      type: InhabitantType.FISH,
-      species: 'Paracheirodon innesi',
-      quantity: 10,
-      size: 'small' as const,
-      temperatureMin: 20,
-      temperatureMax: 28,
-      phMin: 6.0,
-      phMax: 7.5,
-      careLevel: 'easy' as const,
-    };
-
-    it('should add inhabitant', async () => {
-      const aquarium = {
-        id: 'aqua123',
-        userId: 'user123',
-        name: 'Test Tank',
-        waterType: WaterType.FRESHWATER,
-        volume: 100,
-        status: AquariumStatus.ACTIVE,
-        inhabitants: [
-          {
-            id: 'inhab123',
-            ...inhabitantDto,
-            addedDate: new Date(),
-          },
-        ],
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-
-      mockAquariumService.addInhabitant.mockResolvedValue(aquarium);
-
-      const result = await controller.addInhabitant('aqua123', inhabitantDto, mockRequest);
-
-      expect(result).toEqual(aquarium);
-      expect(aquariumService.addInhabitant).toHaveBeenCalledWith(
-        'aqua123',
-        'user123',
-        inhabitantDto
-      );
-    });
-  });
-
-  describe('recordParameters', () => {
-    const parametersDto = {
-      temperature: 25,
-      ph: 7.0,
-      ammonia: 0,
-      nitrite: 0,
-      nitrate: 20,
-      notes: 'Weekly test',
-    };
-
-    it('should record water parameters', async () => {
-      const parameters = {
-        id: 'param123',
-        aquariumId: 'aqua123',
-        ...parametersDto,
-        recordedAt: new Date(),
-        recordedBy: 'user123',
-        overallStatus: 'optimal',
-      };
-
-      mockAquariumService.recordParameters.mockResolvedValue(parameters);
-
-      const result = await controller.recordParameters(
-        'aqua123',
-        parametersDto,
-        mockRequest
-      );
-
-      expect(result).toEqual(parameters);
-      expect(aquariumService.recordParameters).toHaveBeenCalledWith(
-        'aqua123',
-        'user123',
-        parametersDto
-      );
-    });
-  });
-
-  describe('getParametersHistory', () => {
-    it('should return parameters history', async () => {
-      const parameters = [
-        {
-          id: 'param1',
-          aquariumId: 'aqua123',
-          temperature: 25,
-          ph: 7.0,
-          recordedAt: new Date(),
-          recordedBy: 'user123',
+    describe('getParameterTrends', () => {
+      const mockTrends = {
+        temperature: {
+          average: 78.2,
+          trend: 'stable',
+          data: [{ date: '2024-01-01', value: 78 }],
         },
-        {
-          id: 'param2',
-          aquariumId: 'aqua123',
-          temperature: 24,
-          ph: 7.1,
-          recordedAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
-          recordedBy: 'user123',
+        ph: {
+          average: 7.2,
+          trend: 'increasing',
+          data: [{ date: '2024-01-01', value: 7.1 }],
         },
-      ];
-
-      mockAquariumService.getParametersHistory.mockResolvedValue(parameters);
-
-      const result = await controller.getParametersHistory('aqua123', {}, mockRequest);
-
-      expect(result).toEqual(parameters);
-      expect(aquariumService.getParametersHistory).toHaveBeenCalledWith(
-        'aqua123',
-        'user123',
-        {}
-      );
-    });
-
-    it('should pass query parameters', async () => {
-      mockAquariumService.getParametersHistory.mockResolvedValue([]);
-
-      const query = {
-        startDate: '2024-01-01',
-        endDate: '2024-01-31',
-        page: '2',
-        limit: '50',
       };
 
-      await controller.getParametersHistory('aqua123', query, mockRequest);
+      it('should return parameter trends', async () => {
+        aquariumService.getParameterTrends.mockResolvedValue(mockTrends);
 
-      expect(aquariumService.getParametersHistory).toHaveBeenCalledWith(
-        'aqua123',
-        'user123',
-        {
-          startDate: new Date('2024-01-01'),
-          endDate: new Date('2024-01-31'),
-          page: 2,
-          limit: 50,
-        }
-      );
+        const result = await controller.getParameterTrends(mockAquarium.id, mockUser, 30);
+
+        expect(result).toEqual(mockTrends);
+        expect(aquariumService.getParameterTrends).toHaveBeenCalledWith(
+          mockAquarium.id,
+          mockUser.id,
+          30,
+        );
+      });
+
+      it('should use default days when not specified', async () => {
+        aquariumService.getParameterTrends.mockResolvedValue(mockTrends);
+
+        await controller.getParameterTrends(mockAquarium.id, mockUser);
+
+        expect(aquariumService.getParameterTrends).toHaveBeenCalledWith(
+          mockAquarium.id,
+          mockUser.id,
+          30,
+        );
+      });
     });
-  });
 
-  describe('getParameterTrends', () => {
-    it('should return parameter trends', async () => {
-      const trends = {
-        temperature: { avg: 25, min: 24, max: 26, trend: 'stable' },
-        ph: { avg: 7.0, min: 6.8, max: 7.2, trend: 'increasing' },
+    describe('getHealthStatus', () => {
+      const mockHealthStatus = {
+        score: 85,
+        status: 'good',
+        issues: [],
+        recommendations: ['Continue regular maintenance'],
+        lastChecked: new Date('2024-01-01'),
       };
 
-      mockAquariumService.getParameterTrends.mockResolvedValue(trends);
+      it('should return aquarium health status', async () => {
+        aquariumService.getHealthStatus.mockResolvedValue(mockHealthStatus);
 
-      const result = await controller.getParameterTrends(
-        'aqua123',
-        { days: '7' },
-        mockRequest
-      );
+        const result = await controller.getHealthStatus(mockAquarium.id, mockUser);
 
-      expect(result).toEqual(trends);
-      expect(aquariumService.getParameterTrends).toHaveBeenCalledWith(
-        'aqua123',
-        'user123',
-        7
-      );
-    });
-
-    it('should use default days if not provided', async () => {
-      mockAquariumService.getParameterTrends.mockResolvedValue({});
-
-      await controller.getParameterTrends('aqua123', {}, mockRequest);
-
-      expect(aquariumService.getParameterTrends).toHaveBeenCalledWith(
-        'aqua123',
-        'user123',
-        7
-      );
-    });
-  });
-
-  describe('getMaintenanceSchedule', () => {
-    it('should return maintenance schedule', async () => {
-      const schedule = [
-        {
-          equipmentId: 'equip1',
-          equipmentName: 'Filter',
-          equipmentType: EquipmentType.FILTER,
-          lastMaintenance: new Date(),
-          nextMaintenance: new Date(),
-          daysOverdue: 0,
-          priority: 'low' as const,
-        },
-      ];
-
-      mockAquariumService.getMaintenanceSchedule.mockResolvedValue(schedule);
-
-      const result = await controller.getMaintenanceSchedule('aqua123', mockRequest);
-
-      expect(result).toEqual(schedule);
-      expect(aquariumService.getMaintenanceSchedule).toHaveBeenCalledWith(
-        'aqua123',
-        'user123'
-      );
-    });
-  });
-
-  describe('checkCompatibility', () => {
-    const inhabitantDto = {
-      name: 'Test Fish',
-      type: InhabitantType.FISH,
-      species: 'Test species',
-      quantity: 1,
-      size: 'medium' as const,
-      temperatureMin: 24,
-      temperatureMax: 26,
-      phMin: 6.8,
-      phMax: 7.2,
-      careLevel: 'moderate' as const,
-    };
-
-    it('should check compatibility', async () => {
-      const compatibility = {
-        compatible: true,
-        warnings: [],
-        suggestions: ['Consider adding more plants'],
-      };
-
-      mockAquariumService.checkCompatibility.mockResolvedValue(compatibility);
-
-      const result = await controller.checkCompatibility(
-        'aqua123',
-        inhabitantDto,
-        mockRequest
-      );
-
-      expect(result).toEqual(compatibility);
-      expect(aquariumService.checkCompatibility).toHaveBeenCalledWith(
-        'aqua123',
-        'user123',
-        inhabitantDto
-      );
+        expect(result).toEqual(mockHealthStatus);
+        expect(aquariumService.getHealthStatus).toHaveBeenCalledWith(
+          mockAquarium.id,
+          mockUser.id,
+        );
+      });
     });
   });
 });

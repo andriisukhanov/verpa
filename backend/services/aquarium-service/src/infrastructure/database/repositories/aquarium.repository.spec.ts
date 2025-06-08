@@ -1,191 +1,183 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getModelToken } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { MongoMemoryServer } from 'mongodb-memory-server';
-import { MongooseModule } from '@nestjs/mongoose';
 import { AquariumRepository } from './aquarium.repository';
-import { Aquarium as AquariumSchema, AquariumDocument } from '../schemas/aquarium.schema';
-import { Aquarium } from '../../../domain/entities/aquarium.entity';
-import { Equipment } from '../../../domain/entities/equipment.entity';
-import { Inhabitant } from '../../../domain/entities/inhabitant.entity';
-import { WaterParameters } from '../../../domain/entities/water-parameters.entity';
-import { WaterType, AquariumStatus, EquipmentType, InhabitantType } from '@verpa/common';
+import { Aquarium, AquariumDocument } from '../../../domain/entities/aquarium.entity';
+import { WaterParameters, WaterParametersDocument } from '../../../domain/entities/water-parameters.entity';
+import { AquariumType, WaterType, EquipmentType, InhabitantCategory } from '@verpa/common';
 
 describe('AquariumRepository', () => {
   let repository: AquariumRepository;
   let aquariumModel: Model<AquariumDocument>;
-  let mongod: MongoMemoryServer;
+  let waterParametersModel: Model<WaterParametersDocument>;
 
-  beforeAll(async () => {
-    mongod = await MongoMemoryServer.create();
-    const uri = mongod.getUri();
+  const mockUser = {
+    id: 'user123',
+    email: 'test@example.com',
+  };
 
+  const mockAquarium = {
+    _id: '507f1f77bcf86cd799439011',
+    userId: mockUser.id,
+    name: 'Test Tank',
+    type: AquariumType.FRESHWATER,
+    volume: 100,
+    volumeUnit: 'liters',
+    dimensions: {
+      length: 100,
+      width: 40,
+      height: 50,
+      unit: 'cm',
+    },
+    waterType: WaterType.FRESHWATER,
+    description: 'Test aquarium',
+    location: 'Living Room',
+    equipment: [],
+    inhabitants: [],
+    waterParameters: [],
+    maintenanceTasks: [],
+    healthScore: 85,
+    isActive: true,
+    isPublic: false,
+    imageUrl: null,
+    tags: ['planted', 'community'],
+    createdAt: new Date('2024-01-01'),
+    updatedAt: new Date('2024-01-01'),
+    save: jest.fn().mockResolvedValue(this),
+  };
+
+  const mockWaterParameters = {
+    _id: '507f1f77bcf86cd799439012',
+    aquariumId: mockAquarium._id,
+    temperature: 78,
+    ph: 7.2,
+    ammonia: 0,
+    nitrite: 0,
+    nitrate: 10,
+    phosphate: 0.5,
+    gh: 8,
+    kh: 6,
+    tds: 150,
+    dissolvedOxygen: 7,
+    co2: 25,
+    salinity: 0,
+    notes: 'Weekly test',
+    recordedAt: new Date('2024-01-01'),
+    save: jest.fn().mockResolvedValue(this),
+  };
+
+  const mockAquariumModel = {
+    new: jest.fn().mockReturnValue(mockAquarium),
+    constructor: jest.fn().mockReturnValue(mockAquarium),
+    find: jest.fn(),
+    findById: jest.fn(),
+    findOne: jest.fn(),
+    findByIdAndUpdate: jest.fn(),
+    findOneAndUpdate: jest.fn(),
+    updateOne: jest.fn(),
+    updateMany: jest.fn(),
+    deleteOne: jest.fn(),
+    countDocuments: jest.fn(),
+    create: jest.fn(),
+    aggregate: jest.fn(),
+    exec: jest.fn(),
+    populate: jest.fn(),
+    sort: jest.fn(),
+    limit: jest.fn(),
+    skip: jest.fn(),
+  };
+
+  const mockWaterParametersModel = {
+    new: jest.fn().mockReturnValue(mockWaterParameters),
+    constructor: jest.fn().mockReturnValue(mockWaterParameters),
+    find: jest.fn(),
+    findOne: jest.fn(),
+    create: jest.fn(),
+    deleteMany: jest.fn(),
+    aggregate: jest.fn(),
+    exec: jest.fn(),
+  };
+
+  beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      imports: [
-        MongooseModule.forRoot(uri),
-        MongooseModule.forFeature([
-          { name: AquariumSchema.name, schema: AquariumSchema },
-        ]),
+      providers: [
+        AquariumRepository,
+        {
+          provide: getModelToken(Aquarium.name),
+          useValue: mockAquariumModel,
+        },
+        {
+          provide: getModelToken(WaterParameters.name),
+          useValue: mockWaterParametersModel,
+        },
       ],
-      providers: [AquariumRepository],
     }).compile();
 
     repository = module.get<AquariumRepository>(AquariumRepository);
-    aquariumModel = module.get<Model<AquariumDocument>>(getModelToken(AquariumSchema.name));
+    aquariumModel = module.get<Model<AquariumDocument>>(getModelToken(Aquarium.name));
+    waterParametersModel = module.get<Model<WaterParametersDocument>>(
+      getModelToken(WaterParameters.name),
+    );
+
+    jest.clearAllMocks();
   });
 
-  afterAll(async () => {
-    await mongod.stop();
-  });
-
-  beforeEach(async () => {
-    await aquariumModel.deleteMany({});
+  it('should be defined', () => {
+    expect(repository).toBeDefined();
   });
 
   describe('create', () => {
     it('should create a new aquarium', async () => {
-      const aquarium = new Aquarium({
-        userId: 'user123',
-        name: 'Test Tank',
-        waterType: WaterType.FRESHWATER,
-        volume: 100,
-        description: 'Test description',
-      });
+      const createData = {
+        userId: mockUser.id,
+        name: 'New Tank',
+        type: AquariumType.SALTWATER,
+        volume: 200,
+        volumeUnit: 'gallons',
+      };
 
-      const result = await repository.create(aquarium);
+      const mockSave = jest.fn().mockResolvedValue({ ...mockAquarium, ...createData });
+      mockAquariumModel.new.mockReturnValue({ save: mockSave });
 
-      expect(result).toBeDefined();
-      expect(result.id).toBeDefined();
-      expect(result.name).toBe('Test Tank');
-      expect(result.waterType).toBe(WaterType.FRESHWATER);
-      expect(result.volume).toBe(100);
-      expect(result.status).toBe(AquariumStatus.ACTIVE);
+      const result = await repository.create(createData);
+
+      expect(mockAquariumModel.new).toHaveBeenCalledWith(createData);
+      expect(mockSave).toHaveBeenCalled();
+      expect(result).toMatchObject(createData);
     });
 
-    it('should create aquarium with equipment', async () => {
-      const equipment = new Equipment({
-        name: 'Test Filter',
-        type: EquipmentType.FILTER,
-        brand: 'TestBrand',
-        model: 'TestModel',
-      });
+    it('should handle save errors', async () => {
+      const mockSave = jest.fn().mockRejectedValue(new Error('Database error'));
+      mockAquariumModel.new.mockReturnValue({ save: mockSave });
 
-      const aquarium = new Aquarium({
-        userId: 'user123',
-        name: 'Test Tank',
-        waterType: WaterType.FRESHWATER,
-        volume: 100,
-        equipment: [equipment],
-      });
-
-      const result = await repository.create(aquarium);
-
-      expect(result.equipment).toHaveLength(1);
-      expect(result.equipment[0].name).toBe('Test Filter');
-      expect(result.equipment[0].type).toBe(EquipmentType.FILTER);
-    });
-
-    it('should create aquarium with inhabitants', async () => {
-      const inhabitant = new Inhabitant({
-        name: 'Neon Tetra',
-        type: InhabitantType.FISH,
-        species: 'Paracheirodon innesi',
-        quantity: 10,
-        size: 'small',
-        temperatureMin: 20,
-        temperatureMax: 28,
-        phMin: 6.0,
-        phMax: 7.5,
-        careLevel: 'easy',
-      });
-
-      const aquarium = new Aquarium({
-        userId: 'user123',
-        name: 'Test Tank',
-        waterType: WaterType.FRESHWATER,
-        volume: 100,
-        inhabitants: [inhabitant],
-      });
-
-      const result = await repository.create(aquarium);
-
-      expect(result.inhabitants).toHaveLength(1);
-      expect(result.inhabitants[0].species).toBe('Paracheirodon innesi');
-      expect(result.inhabitants[0].quantity).toBe(10);
+      await expect(repository.create({ name: 'Test' })).rejects.toThrow('Database error');
     });
   });
 
   describe('findById', () => {
-    it('should find aquarium by id', async () => {
-      const created = await aquariumModel.create({
-        userId: 'user123',
-        name: 'Test Tank',
-        waterType: WaterType.FRESHWATER,
-        volume: 100,
-        status: AquariumStatus.ACTIVE,
-      });
+    it('should find aquarium by ID', async () => {
+      const mockQuery = {
+        populate: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue(mockAquarium),
+      };
+      mockAquariumModel.findById.mockReturnValue(mockQuery);
 
-      const result = await repository.findById(created._id.toString());
+      const result = await repository.findById(mockAquarium._id);
 
-      expect(result).toBeDefined();
-      expect(result?.id).toBe(created._id.toString());
-      expect(result?.name).toBe('Test Tank');
+      expect(mockAquariumModel.findById).toHaveBeenCalledWith(mockAquarium._id);
+      expect(mockQuery.populate).toHaveBeenCalledWith('equipment');
+      expect(mockQuery.populate).toHaveBeenCalledWith('inhabitants');
+      expect(result).toEqual(mockAquarium);
     });
 
-    it('should return null for non-existent id', async () => {
-      const result = await repository.findById('507f1f77bcf86cd799439011');
+    it('should return null if aquarium not found', async () => {
+      const mockQuery = {
+        populate: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue(null),
+      };
+      mockAquariumModel.findById.mockReturnValue(mockQuery);
 
-      expect(result).toBeNull();
-    });
-
-    it('should not return deleted aquariums', async () => {
-      const created = await aquariumModel.create({
-        userId: 'user123',
-        name: 'Test Tank',
-        waterType: WaterType.FRESHWATER,
-        volume: 100,
-        status: AquariumStatus.ACTIVE,
-        deletedAt: new Date(),
-      });
-
-      const result = await repository.findById(created._id.toString());
-
-      expect(result).toBeNull();
-    });
-  });
-
-  describe('findByIdAndUserId', () => {
-    it('should find aquarium by id and userId', async () => {
-      const created = await aquariumModel.create({
-        userId: 'user123',
-        name: 'Test Tank',
-        waterType: WaterType.FRESHWATER,
-        volume: 100,
-        status: AquariumStatus.ACTIVE,
-      });
-
-      const result = await repository.findByIdAndUserId(
-        created._id.toString(),
-        'user123'
-      );
-
-      expect(result).toBeDefined();
-      expect(result?.id).toBe(created._id.toString());
-    });
-
-    it('should return null for wrong userId', async () => {
-      const created = await aquariumModel.create({
-        userId: 'user123',
-        name: 'Test Tank',
-        waterType: WaterType.FRESHWATER,
-        volume: 100,
-        status: AquariumStatus.ACTIVE,
-      });
-
-      const result = await repository.findByIdAndUserId(
-        created._id.toString(),
-        'wronguser'
-      );
+      const result = await repository.findById('nonexistent');
 
       expect(result).toBeNull();
     });
@@ -193,352 +185,642 @@ describe('AquariumRepository', () => {
 
   describe('findByUserId', () => {
     it('should find all aquariums for a user', async () => {
-      await aquariumModel.create([
-        {
-          userId: 'user123',
-          name: 'Tank 1',
-          waterType: WaterType.FRESHWATER,
-          volume: 100,
-          status: AquariumStatus.ACTIVE,
-        },
-        {
-          userId: 'user123',
-          name: 'Tank 2',
-          waterType: WaterType.SALTWATER,
-          volume: 200,
-          status: AquariumStatus.ACTIVE,
-        },
-        {
-          userId: 'otheruser',
-          name: 'Other Tank',
-          waterType: WaterType.FRESHWATER,
-          volume: 150,
-          status: AquariumStatus.ACTIVE,
-        },
-      ]);
+      const mockQuery = {
+        populate: jest.fn().mockReturnThis(),
+        sort: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([mockAquarium]),
+      };
+      mockAquariumModel.find.mockReturnValue(mockQuery);
 
-      const result = await repository.findByUserId('user123');
+      const result = await repository.findByUserId(mockUser.id);
 
-      expect(result).toHaveLength(2);
-      expect(result[0].name).toBe('Tank 2'); // Should be sorted by createdAt desc
-      expect(result[1].name).toBe('Tank 1');
+      expect(mockAquariumModel.find).toHaveBeenCalledWith({ userId: mockUser.id });
+      expect(mockQuery.sort).toHaveBeenCalledWith({ createdAt: -1 });
+      expect(result).toEqual([mockAquarium]);
     });
 
-    it('should handle pagination', async () => {
-      // Create 15 aquariums
-      const aquariums = [];
-      for (let i = 0; i < 15; i++) {
-        aquariums.push({
-          userId: 'user123',
-          name: `Tank ${i}`,
-          waterType: WaterType.FRESHWATER,
-          volume: 100,
-          status: AquariumStatus.ACTIVE,
-        });
-      }
-      await aquariumModel.create(aquariums);
+    it('should include deleted aquariums when specified', async () => {
+      const mockQuery = {
+        populate: jest.fn().mockReturnThis(),
+        sort: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([mockAquarium]),
+      };
+      mockAquariumModel.find.mockReturnValue(mockQuery);
 
-      const page1 = await repository.findByUserId('user123', { page: 1, limit: 10 });
-      const page2 = await repository.findByUserId('user123', { page: 2, limit: 10 });
+      await repository.findByUserId(mockUser.id, { includeDeleted: true });
 
-      expect(page1).toHaveLength(10);
-      expect(page2).toHaveLength(5);
+      expect(mockAquariumModel.find).toHaveBeenCalledWith({ userId: mockUser.id });
     });
 
-    it('should filter by status', async () => {
-      await aquariumModel.create([
-        {
-          userId: 'user123',
-          name: 'Active Tank',
-          waterType: WaterType.FRESHWATER,
-          volume: 100,
-          status: AquariumStatus.ACTIVE,
-        },
-        {
-          userId: 'user123',
-          name: 'Maintenance Tank',
-          waterType: WaterType.FRESHWATER,
-          volume: 100,
-          status: AquariumStatus.MAINTENANCE,
-        },
-      ]);
+    it('should exclude deleted aquariums by default', async () => {
+      const mockQuery = {
+        populate: jest.fn().mockReturnThis(),
+        sort: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([mockAquarium]),
+      };
+      mockAquariumModel.find.mockReturnValue(mockQuery);
 
-      const result = await repository.findByUserId('user123', {
-        status: AquariumStatus.MAINTENANCE,
+      await repository.findByUserId(mockUser.id, { includeDeleted: false });
+
+      expect(mockAquariumModel.find).toHaveBeenCalledWith({
+        userId: mockUser.id,
+        deletedAt: { $exists: false },
       });
-
-      expect(result).toHaveLength(1);
-      expect(result[0].name).toBe('Maintenance Tank');
     });
   });
 
-  describe('findPublicAquariums', () => {
-    it('should find public aquariums', async () => {
-      await aquariumModel.create([
-        {
-          userId: 'user1',
-          name: 'Public Tank 1',
-          waterType: WaterType.FRESHWATER,
-          volume: 100,
-          status: AquariumStatus.ACTIVE,
-          isPublic: true,
-        },
-        {
-          userId: 'user2',
-          name: 'Public Tank 2',
-          waterType: WaterType.SALTWATER,
-          volume: 200,
-          status: AquariumStatus.ACTIVE,
-          isPublic: true,
-        },
-        {
-          userId: 'user3',
-          name: 'Private Tank',
-          waterType: WaterType.FRESHWATER,
-          volume: 150,
-          status: AquariumStatus.ACTIVE,
-          isPublic: false,
-        },
-      ]);
+  describe('findPaginated', () => {
+    it('should return paginated results with filters', async () => {
+      const filter = { userId: mockUser.id, waterType: WaterType.FRESHWATER };
+      const mockQuery = {
+        sort: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        populate: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([mockAquarium]),
+      };
+      mockAquariumModel.find.mockReturnValue(mockQuery);
+      mockAquariumModel.countDocuments.mockResolvedValue(25);
 
-      const result = await repository.findPublicAquariums();
+      const result = await repository.findPaginated(filter, 2, 10);
 
-      expect(result).toHaveLength(2);
-      expect(result.every(a => a.isPublic)).toBe(true);
+      expect(mockQuery.skip).toHaveBeenCalledWith(10);
+      expect(mockQuery.limit).toHaveBeenCalledWith(10);
+      expect(result).toEqual({
+        data: [mockAquarium],
+        total: 25,
+        page: 2,
+        totalPages: 3,
+      });
     });
 
-    it('should filter public aquariums by water type', async () => {
-      await aquariumModel.create([
-        {
-          userId: 'user1',
-          name: 'Freshwater Public',
-          waterType: WaterType.FRESHWATER,
-          volume: 100,
-          status: AquariumStatus.ACTIVE,
-          isPublic: true,
-        },
-        {
-          userId: 'user2',
-          name: 'Saltwater Public',
-          waterType: WaterType.SALTWATER,
-          volume: 200,
-          status: AquariumStatus.ACTIVE,
-          isPublic: true,
-        },
-      ]);
+    it('should use default pagination values', async () => {
+      const mockQuery = {
+        sort: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        populate: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([]),
+      };
+      mockAquariumModel.find.mockReturnValue(mockQuery);
+      mockAquariumModel.countDocuments.mockResolvedValue(0);
 
-      const result = await repository.findPublicAquariums({
+      await repository.findPaginated();
+
+      expect(mockQuery.sort).toHaveBeenCalledWith({ createdAt: -1 });
+      expect(mockQuery.skip).toHaveBeenCalledWith(0);
+      expect(mockQuery.limit).toHaveBeenCalledWith(20);
+    });
+  });
+
+  describe('findPublic', () => {
+    it('should find public aquariums', async () => {
+      const publicAquarium = { ...mockAquarium, isPublic: true };
+      const mockQuery = {
+        populate: jest.fn().mockReturnThis(),
+        sort: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([publicAquarium]),
+      };
+      mockAquariumModel.find.mockReturnValue(mockQuery);
+
+      const result = await repository.findPublic({ limit: 10 });
+
+      expect(mockAquariumModel.find).toHaveBeenCalledWith({
+        isPublic: true,
+        isActive: true,
+        deletedAt: { $exists: false },
+      });
+      expect(mockQuery.sort).toHaveBeenCalledWith({ healthScore: -1, createdAt: -1 });
+      expect(mockQuery.limit).toHaveBeenCalledWith(10);
+      expect(result).toEqual([publicAquarium]);
+    });
+
+    it('should filter by water type', async () => {
+      const mockQuery = {
+        populate: jest.fn().mockReturnThis(),
+        sort: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        exec: jest.fn().mockResolvedValue([]),
+      };
+      mockAquariumModel.find.mockReturnValue(mockQuery);
+
+      await repository.findPublic({ waterType: WaterType.SALTWATER });
+
+      expect(mockAquariumModel.find).toHaveBeenCalledWith({
+        isPublic: true,
+        isActive: true,
+        deletedAt: { $exists: false },
         waterType: WaterType.SALTWATER,
       });
-
-      expect(result).toHaveLength(1);
-      expect(result[0].waterType).toBe(WaterType.SALTWATER);
     });
   });
 
   describe('update', () => {
-    it('should update aquarium', async () => {
-      const created = await aquariumModel.create({
-        userId: 'user123',
-        name: 'Original Name',
-        waterType: WaterType.FRESHWATER,
-        volume: 100,
-        status: AquariumStatus.ACTIVE,
+    it('should update aquarium by ID', async () => {
+      const updateData = { name: 'Updated Tank', description: 'New description' };
+      const updatedAquarium = { ...mockAquarium, ...updateData };
+
+      mockAquariumModel.findByIdAndUpdate.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(updatedAquarium),
       });
 
-      const aquarium = await repository.findById(created._id.toString());
-      if (!aquarium) throw new Error('Aquarium not found');
+      const result = await repository.update(mockAquarium._id, updateData);
 
-      aquarium.name = 'Updated Name';
-      aquarium.volume = 150;
-
-      const result = await repository.update(aquarium);
-
-      expect(result.name).toBe('Updated Name');
-      expect(result.volume).toBe(150);
-
-      // Verify in database
-      const dbRecord = await aquariumModel.findById(created._id);
-      expect(dbRecord?.name).toBe('Updated Name');
-      expect(dbRecord?.volume).toBe(150);
+      expect(mockAquariumModel.findByIdAndUpdate).toHaveBeenCalledWith(
+        mockAquarium._id,
+        { $set: updateData },
+        { new: true },
+      );
+      expect(result).toEqual(updatedAquarium);
     });
 
-    it('should update equipment array', async () => {
-      const created = await aquariumModel.create({
-        userId: 'user123',
-        name: 'Test Tank',
-        waterType: WaterType.FRESHWATER,
-        volume: 100,
-        status: AquariumStatus.ACTIVE,
-        equipment: [],
+    it('should return null if aquarium not found', async () => {
+      mockAquariumModel.findByIdAndUpdate.mockReturnValue({
+        exec: jest.fn().mockResolvedValue(null),
       });
 
-      const aquarium = await repository.findById(created._id.toString());
-      if (!aquarium) throw new Error('Aquarium not found');
+      const result = await repository.update('nonexistent', {});
 
-      const newEquipment = new Equipment({
-        name: 'New Filter',
-        type: EquipmentType.FILTER,
-      });
-      aquarium.equipment.push(newEquipment);
-
-      const result = await repository.update(aquarium);
-
-      expect(result.equipment).toHaveLength(1);
-      expect(result.equipment[0].name).toBe('New Filter');
+      expect(result).toBeNull();
     });
   });
 
   describe('delete', () => {
-    it('should soft delete aquarium', async () => {
-      const created = await aquariumModel.create({
-        userId: 'user123',
-        name: 'Test Tank',
-        waterType: WaterType.FRESHWATER,
-        volume: 100,
-        status: AquariumStatus.ACTIVE,
+    it('should delete aquarium by ID', async () => {
+      mockAquariumModel.deleteOne.mockReturnValue({
+        exec: jest.fn().mockResolvedValue({ deletedCount: 1 }),
       });
 
-      await repository.delete(created._id.toString());
+      const result = await repository.delete(mockAquarium._id);
 
-      const dbRecord = await aquariumModel.findById(created._id);
-      expect(dbRecord?.deletedAt).toBeDefined();
+      expect(mockAquariumModel.deleteOne).toHaveBeenCalledWith({ _id: mockAquarium._id });
+      expect(result).toBe(true);
+    });
 
-      // Should not be found by findById
-      const result = await repository.findById(created._id.toString());
-      expect(result).toBeNull();
+    it('should return false if aquarium not found', async () => {
+      mockAquariumModel.deleteOne.mockReturnValue({
+        exec: jest.fn().mockResolvedValue({ deletedCount: 0 }),
+      });
+
+      const result = await repository.delete('nonexistent');
+
+      expect(result).toBe(false);
+    });
+  });
+
+  describe('softDelete', () => {
+    it('should soft delete aquarium', async () => {
+      mockAquariumModel.updateOne.mockReturnValue({
+        exec: jest.fn().mockResolvedValue({ modifiedCount: 1 }),
+      });
+
+      const result = await repository.softDelete(mockAquarium._id);
+
+      expect(mockAquariumModel.updateOne).toHaveBeenCalledWith(
+        { _id: mockAquarium._id },
+        { $set: { deletedAt: expect.any(Date), isActive: false } },
+      );
+      expect(result).toBe(true);
+    });
+
+    it('should return false if aquarium not found', async () => {
+      mockAquariumModel.updateOne.mockReturnValue({
+        exec: jest.fn().mockResolvedValue({ modifiedCount: 0 }),
+      });
+
+      const result = await repository.softDelete('nonexistent');
+
+      expect(result).toBe(false);
     });
   });
 
   describe('restore', () => {
     it('should restore soft deleted aquarium', async () => {
-      const created = await aquariumModel.create({
-        userId: 'user123',
-        name: 'Test Tank',
-        waterType: WaterType.FRESHWATER,
-        volume: 100,
-        status: AquariumStatus.ACTIVE,
-        deletedAt: new Date(),
+      mockAquariumModel.updateOne.mockReturnValue({
+        exec: jest.fn().mockResolvedValue({ modifiedCount: 1 }),
       });
 
-      await repository.restore(created._id.toString());
+      const result = await repository.restore(mockAquarium._id);
 
-      const dbRecord = await aquariumModel.findById(created._id);
-      expect(dbRecord?.deletedAt).toBeNull();
-
-      // Should be found by findById
-      const result = await repository.findById(created._id.toString());
-      expect(result).toBeDefined();
+      expect(mockAquariumModel.updateOne).toHaveBeenCalledWith(
+        { _id: mockAquarium._id },
+        { $unset: { deletedAt: 1 }, $set: { isActive: true } },
+      );
+      expect(result).toBe(true);
     });
   });
 
-  describe('countByUserId', () => {
-    it('should count aquariums for user', async () => {
-      await aquariumModel.create([
-        {
-          userId: 'user123',
-          name: 'Tank 1',
-          waterType: WaterType.FRESHWATER,
-          volume: 100,
-          status: AquariumStatus.ACTIVE,
-        },
-        {
-          userId: 'user123',
-          name: 'Tank 2',
-          waterType: WaterType.SALTWATER,
-          volume: 200,
-          status: AquariumStatus.ACTIVE,
-        },
-        {
-          userId: 'user123',
-          name: 'Deleted Tank',
-          waterType: WaterType.FRESHWATER,
-          volume: 150,
-          status: AquariumStatus.ACTIVE,
-          deletedAt: new Date(),
-        },
-        {
-          userId: 'otheruser',
-          name: 'Other Tank',
-          waterType: WaterType.FRESHWATER,
-          volume: 150,
-          status: AquariumStatus.ACTIVE,
-        },
-      ]);
+  describe('count', () => {
+    it('should count documents with filter', async () => {
+      mockAquariumModel.countDocuments.mockResolvedValue(10);
 
-      const count = await repository.countByUserId('user123');
+      const result = await repository.count({ userId: mockUser.id });
 
-      expect(count).toBe(2); // Should not count deleted
+      expect(mockAquariumModel.countDocuments).toHaveBeenCalledWith({ userId: mockUser.id });
+      expect(result).toBe(10);
+    });
+
+    it('should count all documents with empty filter', async () => {
+      mockAquariumModel.countDocuments.mockResolvedValue(50);
+
+      const result = await repository.count();
+
+      expect(mockAquariumModel.countDocuments).toHaveBeenCalledWith({});
+      expect(result).toBe(50);
     });
   });
 
   describe('exists', () => {
-    it('should check if aquarium exists', async () => {
-      const created = await aquariumModel.create({
-        userId: 'user123',
-        name: 'Test Tank',
-        waterType: WaterType.FRESHWATER,
-        volume: 100,
-        status: AquariumStatus.ACTIVE,
+    it('should return true if aquarium exists', async () => {
+      mockAquariumModel.countDocuments.mockReturnValue({
+        limit: jest.fn().mockResolvedValue(1),
       });
 
-      const exists = await repository.exists(created._id.toString());
-      const notExists = await repository.exists('507f1f77bcf86cd799439011');
+      const result = await repository.exists({ name: 'Test Tank' });
 
-      expect(exists).toBe(true);
-      expect(notExists).toBe(false);
+      expect(mockAquariumModel.countDocuments).toHaveBeenCalledWith({ name: 'Test Tank' });
+      expect(result).toBe(true);
+    });
+
+    it('should return false if aquarium does not exist', async () => {
+      mockAquariumModel.countDocuments.mockReturnValue({
+        limit: jest.fn().mockResolvedValue(0),
+      });
+
+      const result = await repository.exists({ name: 'Nonexistent' });
+
+      expect(result).toBe(false);
     });
   });
 
-  describe('domain entity mapping', () => {
-    it('should correctly map latest water parameters', async () => {
-      const parameters = {
-        temperature: 25,
-        ph: 7.0,
-        ammonia: 0,
-        nitrite: 0,
-        nitrate: 20,
-        recordedAt: new Date(),
-      };
+  describe('Equipment methods', () => {
+    const mockEquipment = {
+      id: 'equipment123',
+      name: 'Test Filter',
+      type: EquipmentType.FILTER,
+      brand: 'TestBrand',
+      model: 'TestModel',
+      purchaseDate: new Date('2024-01-01'),
+      warrantyExpiry: new Date('2025-01-01'),
+      isActive: true,
+    };
 
-      const created = await aquariumModel.create({
-        userId: 'user123',
-        name: 'Test Tank',
-        waterType: WaterType.FRESHWATER,
-        volume: 100,
-        status: AquariumStatus.ACTIVE,
-        latestParameters: parameters,
+    describe('addEquipment', () => {
+      it('should add equipment to aquarium', async () => {
+        const updatedAquarium = {
+          ...mockAquarium,
+          equipment: [...mockAquarium.equipment, mockEquipment],
+        };
+
+        mockAquariumModel.findByIdAndUpdate.mockReturnValue({
+          exec: jest.fn().mockResolvedValue(updatedAquarium),
+        });
+
+        const result = await repository.addEquipment(mockAquarium._id, mockEquipment);
+
+        expect(mockAquariumModel.findByIdAndUpdate).toHaveBeenCalledWith(
+          mockAquarium._id,
+          { $push: { equipment: mockEquipment } },
+          { new: true },
+        );
+        expect(result).toEqual(updatedAquarium);
       });
-
-      const result = await repository.findById(created._id.toString());
-
-      expect(result?.latestParameters).toBeDefined();
-      expect(result?.latestParameters?.temperature).toBe(25);
-      expect(result?.latestParameters?.ph).toBe(7.0);
     });
 
-    it('should calculate health status based on parameters', async () => {
-      const criticalParams = {
-        temperature: 35,
-        ph: 9.0,
-        ammonia: 2,
-        nitrite: 1,
-        nitrate: 100,
-        recordedAt: new Date(),
-      };
+    describe('updateEquipment', () => {
+      it('should update specific equipment', async () => {
+        const updateData = { name: 'Updated Filter' };
+        const aquariumWithEquipment = {
+          ...mockAquarium,
+          equipment: [mockEquipment],
+        };
 
-      const created = await aquariumModel.create({
-        userId: 'user123',
-        name: 'Test Tank',
-        waterType: WaterType.FRESHWATER,
-        volume: 100,
-        status: AquariumStatus.ACTIVE,
-        latestParameters: criticalParams,
+        mockAquariumModel.findOneAndUpdate.mockReturnValue({
+          exec: jest.fn().mockResolvedValue(aquariumWithEquipment),
+        });
+
+        const result = await repository.updateEquipment(
+          mockAquarium._id,
+          mockEquipment.id,
+          updateData,
+        );
+
+        expect(mockAquariumModel.findOneAndUpdate).toHaveBeenCalledWith(
+          { _id: mockAquarium._id, 'equipment.id': mockEquipment.id },
+          { $set: { 'equipment.$': { ...mockEquipment, ...updateData } } },
+          { new: true },
+        );
+        expect(result).toEqual(aquariumWithEquipment);
+      });
+    });
+
+    describe('removeEquipment', () => {
+      it('should remove equipment from aquarium', async () => {
+        mockAquariumModel.findByIdAndUpdate.mockReturnValue({
+          exec: jest.fn().mockResolvedValue(mockAquarium),
+        });
+
+        const result = await repository.removeEquipment(mockAquarium._id, mockEquipment.id);
+
+        expect(mockAquariumModel.findByIdAndUpdate).toHaveBeenCalledWith(
+          mockAquarium._id,
+          { $pull: { equipment: { id: mockEquipment.id } } },
+          { new: true },
+        );
+        expect(result).toEqual(mockAquarium);
+      });
+    });
+  });
+
+  describe('Inhabitant methods', () => {
+    const mockInhabitant = {
+      id: 'inhabitant123',
+      species: 'Betta splendens',
+      commonName: 'Siamese Fighting Fish',
+      category: InhabitantCategory.FISH,
+      quantity: 1,
+      sex: 'male',
+      addedDate: new Date('2024-01-01'),
+      notes: 'Beautiful blue halfmoon',
+    };
+
+    describe('addInhabitant', () => {
+      it('should add inhabitant to aquarium', async () => {
+        const updatedAquarium = {
+          ...mockAquarium,
+          inhabitants: [...mockAquarium.inhabitants, mockInhabitant],
+        };
+
+        mockAquariumModel.findByIdAndUpdate.mockReturnValue({
+          exec: jest.fn().mockResolvedValue(updatedAquarium),
+        });
+
+        const result = await repository.addInhabitant(mockAquarium._id, mockInhabitant);
+
+        expect(mockAquariumModel.findByIdAndUpdate).toHaveBeenCalledWith(
+          mockAquarium._id,
+          { $push: { inhabitants: mockInhabitant } },
+          { new: true },
+        );
+        expect(result).toEqual(updatedAquarium);
+      });
+    });
+
+    describe('updateInhabitant', () => {
+      it('should update specific inhabitant', async () => {
+        const updateData = { quantity: 2, notes: 'Added another' };
+        const aquariumWithInhabitant = {
+          ...mockAquarium,
+          inhabitants: [mockInhabitant],
+        };
+
+        mockAquariumModel.findOneAndUpdate.mockReturnValue({
+          exec: jest.fn().mockResolvedValue(aquariumWithInhabitant),
+        });
+
+        const result = await repository.updateInhabitant(
+          mockAquarium._id,
+          mockInhabitant.id,
+          updateData,
+        );
+
+        expect(mockAquariumModel.findOneAndUpdate).toHaveBeenCalledWith(
+          { _id: mockAquarium._id, 'inhabitants.id': mockInhabitant.id },
+          { $set: { 'inhabitants.$': { ...mockInhabitant, ...updateData } } },
+          { new: true },
+        );
+        expect(result).toEqual(aquariumWithInhabitant);
+      });
+    });
+
+    describe('removeInhabitant', () => {
+      it('should remove inhabitant from aquarium', async () => {
+        mockAquariumModel.findByIdAndUpdate.mockReturnValue({
+          exec: jest.fn().mockResolvedValue(mockAquarium),
+        });
+
+        const result = await repository.removeInhabitant(mockAquarium._id, mockInhabitant.id);
+
+        expect(mockAquariumModel.findByIdAndUpdate).toHaveBeenCalledWith(
+          mockAquarium._id,
+          { $pull: { inhabitants: { id: mockInhabitant.id } } },
+          { new: true },
+        );
+        expect(result).toEqual(mockAquarium);
+      });
+    });
+  });
+
+  describe('Water Parameters methods', () => {
+    describe('createWaterParameters', () => {
+      it('should create water parameters', async () => {
+        const paramData = {
+          aquariumId: mockAquarium._id,
+          temperature: 78,
+          ph: 7.2,
+          ammonia: 0,
+          nitrite: 0,
+          nitrate: 10,
+        };
+
+        const mockSave = jest.fn().mockResolvedValue(mockWaterParameters);
+        mockWaterParametersModel.new.mockReturnValue({ save: mockSave });
+
+        const result = await repository.createWaterParameters(paramData);
+
+        expect(mockWaterParametersModel.new).toHaveBeenCalledWith(paramData);
+        expect(mockSave).toHaveBeenCalled();
+        expect(result).toEqual(mockWaterParameters);
+      });
+    });
+
+    describe('findWaterParametersByAquarium', () => {
+      it('should find water parameters with date filter', async () => {
+        const mockQuery = {
+          sort: jest.fn().mockReturnThis(),
+          limit: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([mockWaterParameters]),
+        };
+        mockWaterParametersModel.find.mockReturnValue(mockQuery);
+
+        const options = {
+          from: new Date('2024-01-01'),
+          to: new Date('2024-01-31'),
+          limit: 50,
+        };
+
+        const result = await repository.findWaterParametersByAquarium(mockAquarium._id, options);
+
+        expect(mockWaterParametersModel.find).toHaveBeenCalledWith({
+          aquariumId: mockAquarium._id,
+          recordedAt: { $gte: options.from, $lte: options.to },
+        });
+        expect(mockQuery.sort).toHaveBeenCalledWith({ recordedAt: -1 });
+        expect(mockQuery.limit).toHaveBeenCalledWith(50);
+        expect(result).toEqual([mockWaterParameters]);
       });
 
-      const result = await repository.findById(created._id.toString());
+      it('should find all parameters without date filter', async () => {
+        const mockQuery = {
+          sort: jest.fn().mockReturnThis(),
+          limit: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue([mockWaterParameters]),
+        };
+        mockWaterParametersModel.find.mockReturnValue(mockQuery);
 
-      expect(result?.getHealthStatus()).toBe('critical');
+        await repository.findWaterParametersByAquarium(mockAquarium._id);
+
+        expect(mockWaterParametersModel.find).toHaveBeenCalledWith({
+          aquariumId: mockAquarium._id,
+        });
+      });
+    });
+
+    describe('findLatestWaterParameters', () => {
+      it('should find latest water parameters', async () => {
+        const mockQuery = {
+          sort: jest.fn().mockReturnThis(),
+          limit: jest.fn().mockReturnThis(),
+          exec: jest.fn().mockResolvedValue(mockWaterParameters),
+        };
+        mockWaterParametersModel.findOne.mockReturnValue(mockQuery);
+
+        const result = await repository.findLatestWaterParameters(mockAquarium._id);
+
+        expect(mockWaterParametersModel.findOne).toHaveBeenCalledWith({
+          aquariumId: mockAquarium._id,
+        });
+        expect(mockQuery.sort).toHaveBeenCalledWith({ recordedAt: -1 });
+        expect(result).toEqual(mockWaterParameters);
+      });
+    });
+
+    describe('deleteWaterParametersByAquarium', () => {
+      it('should delete all water parameters for aquarium', async () => {
+        mockWaterParametersModel.deleteMany.mockReturnValue({
+          exec: jest.fn().mockResolvedValue({ deletedCount: 10 }),
+        });
+
+        const result = await repository.deleteWaterParametersByAquarium(mockAquarium._id);
+
+        expect(mockWaterParametersModel.deleteMany).toHaveBeenCalledWith({
+          aquariumId: mockAquarium._id,
+        });
+        expect(result).toBe(true);
+      });
+    });
+  });
+
+  describe('Aggregation methods', () => {
+    describe('getUserStats', () => {
+      it('should return user statistics', async () => {
+        const mockStats = {
+          totalAquariums: 5,
+          activeAquariums: 4,
+          totalVolume: 500,
+          aquariumsByType: {
+            [AquariumType.FRESHWATER]: 3,
+            [AquariumType.SALTWATER]: 2,
+          },
+        };
+
+        mockAquariumModel.aggregate.mockReturnValue({
+          exec: jest.fn().mockResolvedValue([mockStats]),
+        });
+
+        const result = await repository.getUserStats(mockUser.id);
+
+        expect(mockAquariumModel.aggregate).toHaveBeenCalledWith([
+          { $match: { userId: mockUser.id, deletedAt: { $exists: false } } },
+          expect.objectContaining({ $group: expect.any(Object) }),
+        ]);
+        expect(result).toEqual(mockStats);
+      });
+
+      it('should return empty stats if no aquariums', async () => {
+        mockAquariumModel.aggregate.mockReturnValue({
+          exec: jest.fn().mockResolvedValue([]),
+        });
+
+        const result = await repository.getUserStats(mockUser.id);
+
+        expect(result).toBeNull();
+      });
+    });
+
+    describe('getParameterTrends', () => {
+      it('should return parameter trends', async () => {
+        const mockTrends = [
+          { date: '2024-01-01', avgTemperature: 78, avgPh: 7.2 },
+          { date: '2024-01-02', avgTemperature: 78.5, avgPh: 7.1 },
+        ];
+
+        mockWaterParametersModel.aggregate.mockReturnValue({
+          exec: jest.fn().mockResolvedValue(mockTrends),
+        });
+
+        const result = await repository.getParameterTrends(mockAquarium._id, 7);
+
+        expect(mockWaterParametersModel.aggregate).toHaveBeenCalledWith([
+          {
+            $match: {
+              aquariumId: mockAquarium._id,
+              recordedAt: { $gte: expect.any(Date) },
+            },
+          },
+          expect.objectContaining({ $group: expect.any(Object) }),
+          expect.objectContaining({ $sort: { date: 1 } }),
+        ]);
+        expect(result).toEqual(mockTrends);
+      });
+    });
+  });
+
+  describe('updateHealthScore', () => {
+    it('should update aquarium health score', async () => {
+      mockAquariumModel.updateOne.mockReturnValue({
+        exec: jest.fn().mockResolvedValue({ modifiedCount: 1 }),
+      });
+
+      const result = await repository.updateHealthScore(mockAquarium._id, 95);
+
+      expect(mockAquariumModel.updateOne).toHaveBeenCalledWith(
+        { _id: mockAquarium._id },
+        { $set: { healthScore: 95, healthScoreUpdatedAt: expect.any(Date) } },
+      );
+      expect(result).toBe(true);
+    });
+  });
+
+  describe('updateImage', () => {
+    it('should update aquarium image URL', async () => {
+      const imageUrl = 'https://storage.example.com/aquarium123.jpg';
+      mockAquariumModel.updateOne.mockReturnValue({
+        exec: jest.fn().mockResolvedValue({ modifiedCount: 1 }),
+      });
+
+      const result = await repository.updateImage(mockAquarium._id, imageUrl);
+
+      expect(mockAquariumModel.updateOne).toHaveBeenCalledWith(
+        { _id: mockAquarium._id },
+        { $set: { imageUrl } },
+      );
+      expect(result).toBe(true);
+    });
+
+    it('should remove image URL when null', async () => {
+      mockAquariumModel.updateOne.mockReturnValue({
+        exec: jest.fn().mockResolvedValue({ modifiedCount: 1 }),
+      });
+
+      const result = await repository.updateImage(mockAquarium._id, null);
+
+      expect(mockAquariumModel.updateOne).toHaveBeenCalledWith(
+        { _id: mockAquarium._id },
+        { $unset: { imageUrl: 1 } },
+      );
+      expect(result).toBe(true);
     });
   });
 });

@@ -1,0 +1,282 @@
+version: '3.8'
+
+services:
+  # MongoDB
+  mongodb:
+    image: mongo:7.0
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=testpassword
+      - MONGO_INITDB_DATABASE=verpa_test
+    ports:
+      - "27018:27017"
+    volumes:
+      - ./backend/docker/mongodb/init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/verpa_test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Redis
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Kafka
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    depends_on:
+      - zookeeper
+    ports:
+      - "9093:9093"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # MinIO
+  minio:
+    image: minio/minio:latest
+    ports:
+      - "9001:9000"
+      - "9002:9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # API Gateway
+  api-gateway:
+    build:
+      context: ./backend/services/api-gateway
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3000"
+    environment:
+      - NODE_ENV=test
+      - PORT=3000
+      - MONGODB_URI=mongodb://admin:testpassword@mongodb:27017/verpa_test?authSource=admin
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=test-jwt-secret
+      - JWT_EXPIRES_IN=1d
+      - SERVICE_DISCOVERY_TYPE=static
+      - USER_SERVICE_URL=http://user-service:3000
+      - AQUARIUM_SERVICE_URL=http://aquarium-service:3000
+      - EVENT_SERVICE_URL=http://event-service:3000
+      - NOTIFICATION_SERVICE_URL=http://notification-service:3000
+      - SUBSCRIPTION_SERVICE_URL=http://subscription-service:3000
+      - ANALYTICS_SERVICE_URL=http://analytics-service:3000
+      - MEDIA_SERVICE_URL=http://media-service:3000
+    depends_on:
+      - mongodb
+      - redis
+      - user-service
+      - aquarium-service
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # User Service
+  user-service:
+    build:
+      context: ./backend/services/user-service
+      dockerfile: Dockerfile
+    environment:
+      - NODE_ENV=test
+      - PORT=3000
+      - MONGODB_URI=mongodb://admin:testpassword@mongodb:27017/verpa_test?authSource=admin
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=test-jwt-secret
+      - JWT_EXPIRES_IN=1d
+      - REFRESH_TOKEN_SECRET=test-refresh-secret
+      - REFRESH_TOKEN_EXPIRES_IN=7d
+      - EMAIL_VERIFICATION_SECRET=test-email-secret
+      - PASSWORD_RESET_SECRET=test-reset-secret
+      - KAFKA_BROKERS=kafka:9092
+    depends_on:
+      - mongodb
+      - redis
+      - kafka
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Aquarium Service
+  aquarium-service:
+    build:
+      context: ./backend/services/aquarium-service
+      dockerfile: Dockerfile
+    environment:
+      - NODE_ENV=test
+      - PORT=3000
+      - MONGODB_URI=mongodb://admin:testpassword@mongodb:27017/verpa_test?authSource=admin
+      - REDIS_URL=redis://redis:6379
+      - KAFKA_BROKERS=kafka:9092
+      - MINIO_ENDPOINT=minio
+      - MINIO_PORT=9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+      - MINIO_USE_SSL=false
+    depends_on:
+      - mongodb
+      - redis
+      - kafka
+      - minio
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Event Service
+  event-service:
+    build:
+      context: ./backend/services/event-service
+      dockerfile: Dockerfile
+    environment:
+      - NODE_ENV=test
+      - PORT=3000
+      - MONGODB_URI=mongodb://admin:testpassword@mongodb:27017/verpa_test?authSource=admin
+      - REDIS_URL=redis://redis:6379
+      - KAFKA_BROKERS=kafka:9092
+    depends_on:
+      - mongodb
+      - redis
+      - kafka
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Notification Service
+  notification-service:
+    build:
+      context: ./backend/services/notification-service
+      dockerfile: Dockerfile
+    environment:
+      - NODE_ENV=test
+      - PORT=3000
+      - MONGODB_URI=mongodb://admin:testpassword@mongodb:27017/verpa_test?authSource=admin
+      - REDIS_URL=redis://redis:6379
+      - KAFKA_BROKERS=kafka:9092
+      - EMAIL_PROVIDER=test
+      - SMS_PROVIDER=test
+      - PUSH_PROVIDER=test
+    depends_on:
+      - mongodb
+      - redis
+      - kafka
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Subscription Service
+  subscription-service:
+    build:
+      context: ./backend/services/subscription-service
+      dockerfile: Dockerfile
+    environment:
+      - NODE_ENV=test
+      - PORT=3000
+      - MONGODB_URI=mongodb://admin:testpassword@mongodb:27017/verpa_test?authSource=admin
+      - REDIS_URL=redis://redis:6379
+      - KAFKA_BROKERS=kafka:9092
+      - STRIPE_SECRET_KEY=sk_test_123456789
+      - STRIPE_WEBHOOK_SECRET=whsec_test_123456789
+    depends_on:
+      - mongodb
+      - redis
+      - kafka
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Analytics Service
+  analytics-service:
+    build:
+      context: ./backend/services/analytics-service
+      dockerfile: Dockerfile
+    environment:
+      - NODE_ENV=test
+      - PORT=3000
+      - MONGODB_URI=mongodb://admin:testpassword@mongodb:27017/verpa_test?authSource=admin
+      - TIMESCALE_URI=postgresql://postgres:password@timescaledb:5432/verpa_analytics_test
+      - REDIS_URL=redis://redis:6379
+      - KAFKA_BROKERS=kafka:9092
+    depends_on:
+      - mongodb
+      - redis
+      - kafka
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Media Service
+  media-service:
+    build:
+      context: ./backend/services/media-service
+      dockerfile: Dockerfile
+    environment:
+      - NODE_ENV=test
+      - PORT=3000
+      - MONGODB_URI=mongodb://admin:testpassword@mongodb:27017/verpa_test?authSource=admin
+      - REDIS_URL=redis://redis:6379
+      - MINIO_ENDPOINT=minio
+      - MINIO_PORT=9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+      - MINIO_USE_SSL=false
+      - MINIO_BUCKET=verpa-media-test
+    depends_on:
+      - mongodb
+      - redis
+      - minio
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  default:
+    name: verpa-test-network
